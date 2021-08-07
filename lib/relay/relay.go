@@ -19,7 +19,6 @@ package relay
 import (
 	"errors"
 	"net"
-	"os"
 	"time"
 
 	"github.com/Mike-Joseph/sedire/lib/logging"
@@ -146,7 +145,10 @@ func (r *Relay) proxyRequest(req *packet, reflect bool, deadline time.Time, logg
 	for {
 		p, err := readFrom(pc)
 		if err != nil {
-			if !errors.Is(err, os.ErrDeadlineExceeded) {
+			netErr, ok := err.(net.Error)
+			if ok && netErr != nil && netErr.Timeout() {
+				logger.Trace().Msg("Proxy expired")
+			} else {
 				logger.Err(err).Msg("Unexpected read error on proxy socket")
 			}
 			break

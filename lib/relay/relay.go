@@ -198,14 +198,14 @@ func (r *Relay) Validate() error {
 }
 
 func (r *Relay) Listen() {
+	r.Logger.Trace().Msg("Starting multicast listener")
 	if err := r.Validate(); err != nil {
-		r.Logger.Err(err).Msg("Could not start listener")
+		r.Logger.Err(err).Msg("Could not start multicast listener")
 		return
 	}
-	// new mcast socket bound to group with appropriate options set
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: IPv4mcast.IP, Port: r.Group.Port})
 	if err != nil {
-		r.Logger.Err(err).Msg("Could not bind socket")
+		r.Logger.Err(err).Msg("Could not bind multicast listener socket")
 		return
 	}
 	defer conn.Close()
@@ -216,14 +216,15 @@ func (r *Relay) Listen() {
 	}
 	recvIfIndices := mapset.NewThreadUnsafeSet()
 	for _, ifi := range r.IfiRecvList {
+		ctx := r.Logger.With()
+		ctx = ctx.Str("interface", ifi.Name)
+		ctx = ctx.Int("ifIndex", ifi.Index)
+		l := ctx.Logger()
 		if err := pc.JoinGroup(ifi, r.Group); err != nil {
-			ctx := r.Logger.With()
-			ctx = ctx.Str("interface", ifi.Name)
-			ctx = ctx.Int("ifIndex", ifi.Index)
-			l := ctx.Logger()
-			l.Err(err).Msg("Could not join group on listener socket")
+			l.Err(err).Msg("Could not join multicast group on listener socket")
 			continue
 		}
+		l.Debug().Msg("Joined multicast group on listener socket")
 		recvIfIndices.Add(ifi.Index)
 	}
 	reflectIfIndices := mapset.NewThreadUnsafeSet()
@@ -267,4 +268,5 @@ func (r *Relay) Listen() {
 			l.Trace().Msg("Discarding packet not destined to this relay")
 		}
 	}
+	r.Logger.Warn().Msg("This relay instance is terminating")
 }

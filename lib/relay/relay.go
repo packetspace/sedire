@@ -155,10 +155,8 @@ func (r *Relay) proxyRequest(req *packet, reflect bool, deadline time.Time, logg
 		}
 		ctx := logger.With()
 		ctx = ctx.Str("reply_receive_interface", p.Ifi.Name)
-		ctx = ctx.IPAddr("reply_dst_address", p.Dst.IP)
-		ctx = ctx.Int("reply_dst_port", p.Dst.Port)
-		ctx = ctx.IPAddr("reply_src_address", p.Src.IP)
-		ctx = ctx.Int("reply_src_port", p.Src.Port)
+		ctx = ctx.Str("reply_src_address", p.Src.String())
+		ctx = ctx.Str("reply_dst_address", p.Dst.String())
 		ctx = ctx.Int("reply_packet_size", len(p.Msg))
 		l := ctx.Logger()
 		if xmitIfIndices.Contains(p.Ifi.Index) {
@@ -248,10 +246,8 @@ func (r *Relay) Listen() {
 		}
 		ctx := r.Logger.With()
 		ctx = ctx.Str("request_receive_interface", p.Ifi.Name)
-		ctx = ctx.IPAddr("request_dst_address", p.Dst.IP)
-		ctx = ctx.Int("request_dst_port", p.Dst.Port)
-		ctx = ctx.IPAddr("request_src_address", p.Src.IP)
-		ctx = ctx.Int("request_src_port", p.Src.Port)
+		ctx = ctx.Str("request_src", p.Src.String())
+		ctx = ctx.Str("request_dst", p.Dst.String())
 		ctx = ctx.Int("request_packet_size", len(p.Msg))
 		l := ctx.Logger()
 		if p.Dst.IP.Equal(r.Group.IP) && recvIfIndices.Contains(p.Ifi.Index) {

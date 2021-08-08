@@ -122,8 +122,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		g := c.GetUDP4Addr("group")
 		ctx := logging.Logger.With()
 		ctx = ctx.Str("relay", name)
-		ctx = ctx.IPAddr("group", g.IP)
-		ctx = ctx.Int("port", g.Port)
+		ctx = ctx.Str("group", g.String())
 		l := ctx.Logger()
 		relays[name] = &relay.Relay{
 			Group:           g,

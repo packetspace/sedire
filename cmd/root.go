@@ -78,6 +78,7 @@ func initConfig() {
 	if addMDNS {
 		viper.SetDefault("mdns.group", "224.0.0.251:5353")
 		viper.SetDefault("mdns.reuse_source_port_requests", true)
+		viper.SetDefault("mdns.accept_unicast", true)
 	}
 	if addSSDP {
 		viper.SetDefault("ssdp.group", "239.255.255.250:1900")
@@ -131,6 +132,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 			IfiSendList:         c.GetIfiList("send_interfaces"),
 			IfiReflectList:      c.GetIfiList("reflect_interfaces"),
 			ProxyMode:           c.GetBool("proxy_mode"),
+			AcceptUnicast:       c.GetBool("accept_unicast"),
 			RequestSrcPortReuse: c.GetBool("reuse_source_port_requests"),
 			ReplySrcPortReuse:   c.GetBool("reuse_source_port_replies"),
 			ResponseTimeout:     c.GetDuration("response_timeout"),

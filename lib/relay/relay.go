@@ -27,10 +27,7 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-var IPv4mcast = net.IPNet{
-	IP:   net.IPv4(224, 0, 0, 0),
-	Mask: net.CIDRMask(4, 32),
-}
+const IPv4mcast = "224.0.0.0"
 
 type Relay struct {
 	Group               *net.UDPAddr
@@ -38,11 +35,13 @@ type Relay struct {
 	IfiSendList         []*net.Interface
 	IfiReflectList      []*net.Interface
 	ProxyMode           bool
+	AcceptUnicast       bool
 	RequestSrcPortReuse bool
 	ReplySrcPortReuse   bool
 	ResponseTimeout     time.Duration
 	Logger              logging.LoggerInstance
-	mcastListener       *ipv4.PacketConn
+
+	mcastListener *ipv4.PacketConn
 }
 
 type packet struct {
@@ -186,7 +185,7 @@ func (r *Relay) Validate() error {
 	if !r.ProxyMode {
 		return errors.New("proxy mode must be enabled in current version")
 	}
-	if !IPv4mcast.Contains(r.Group.IP) {
+	if !r.Group.IP.IsMulticast() {
 		return errors.New("group must have a valid multicast address")
 	}
 	if r.Group.Port <= 0 || r.Group.Port >= 65535 {
@@ -207,7 +206,10 @@ func (r *Relay) Listen() {
 		r.Logger.Err(err).Msg("Could not start multicast listener")
 		return
 	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: IPv4mcast.IP, Port: r.Group.Port})
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{
+		IP:   net.ParseIP(IPv4mcast),
+		Port: r.Group.Port,
+	})
 	if err != nil {
 		r.Logger.Err(err).Msg("Could not bind multicast listener socket")
 		return
@@ -256,7 +258,7 @@ func (r *Relay) Listen() {
 		ctx = ctx.Str("request_dst", p.Dst.String())
 		ctx = ctx.Int("request_packet_size", len(p.Msg))
 		l := ctx.Logger()
-		if p.Dst.IP.Equal(r.Group.IP) && recvIfIndices.Contains(p.Ifi.Index) {
+		if (p.Dst.IP.Equal(r.Group.IP) || (r.AcceptUnicast && p.Dst.IP.IsGlobalUnicast())) && recvIfIndices.Contains(p.Ifi.Index) {
 			reflect := reflectIfIndices.Contains(p.Ifi.Index)
 			l.Trace().Msg("Processing packet destined to this relay")
 			logger := logging.Instance(l)

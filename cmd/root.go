@@ -60,8 +60,8 @@ func init() {
 	pf.StringVarP(&cfgFile, "config", "c", "", "config file")
 	pf.StringVarP(&stderrLevel, "stderr", "s", "info", "stderr logging level")
 	pf.StringVarP(&syslogLevel, "syslog", "l", "disabled", "syslog logging level")
-	pf.BoolVarP(&addSSDP, "ssdp", "S", false, "enable automatic handling for SSDP packets")
 	pf.BoolVarP(&addMDNS, "mdns", "M", false, "enable automatic handling for mDNS packets")
+	pf.BoolVarP(&addSSDP, "ssdp", "S", false, "enable automatic handling for SSDP packets")
 	pf.StringArrayP("interface", "i", nil, "interface to use as both send and receive")
 	viper.BindPFlag("send_interfaces", pf.Lookup("interface"))
 	viper.BindPFlag("receive_interfaces", pf.Lookup("interface"))
@@ -75,12 +75,13 @@ func initConfig() {
 	viper.SetDefault("proxy_mode", true)
 	viper.SetDefault("response_timeout", "10s")
 
-	if addSSDP {
-		viper.SetDefault("ssdp.group", "239.255.255.250:1900")
-	}
 	if addMDNS {
 		viper.SetDefault("mdns.group", "224.0.0.251:5353")
-		viper.SetDefault("mdns.reuse_source_port", true)
+		viper.SetDefault("mdns.reuse_source_port_requests", true)
+	}
+	if addSSDP {
+		viper.SetDefault("ssdp.group", "239.255.255.250:1900")
+		viper.SetDefault("ssdp.reuse_source_port_replies", true)
 	}
 
 	if cfgFile != "" {
@@ -125,14 +126,15 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		ctx = ctx.Str("group", g.String())
 		l := ctx.Logger()
 		relays[name] = &relay.Relay{
-			Group:           g,
-			IfiRecvList:     c.GetIfiList("receive_interfaces"),
-			IfiSendList:     c.GetIfiList("send_interfaces"),
-			IfiReflectList:  c.GetIfiList("reflect_interfaces"),
-			ProxyMode:       c.GetBool("proxy_mode"),
-			SrcPortReuse:    c.GetBool("reuse_source_port"),
-			ResponseTimeout: c.GetDuration("response_timeout"),
-			Logger:          logging.Instance(l),
+			Group:               g,
+			IfiRecvList:         c.GetIfiList("receive_interfaces"),
+			IfiSendList:         c.GetIfiList("send_interfaces"),
+			IfiReflectList:      c.GetIfiList("reflect_interfaces"),
+			ProxyMode:           c.GetBool("proxy_mode"),
+			RequestSrcPortReuse: c.GetBool("reuse_source_port_requests"),
+			ReplySrcPortReuse:   c.GetBool("reuse_source_port_replies"),
+			ResponseTimeout:     c.GetDuration("response_timeout"),
+			Logger:              logging.Instance(l),
 		}
 		if !c.GetBool("skip_invalid") {
 			if err := relays[name].Validate(); err != nil {

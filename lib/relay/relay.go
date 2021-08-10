@@ -33,14 +33,16 @@ var IPv4mcast = net.IPNet{
 }
 
 type Relay struct {
-	Group           *net.UDPAddr
-	IfiRecvList     []*net.Interface
-	IfiSendList     []*net.Interface
-	IfiReflectList  []*net.Interface
-	ProxyMode       bool
-	SrcPortReuse    bool
-	ResponseTimeout time.Duration
-	Logger          logging.LoggerInstance
+	Group               *net.UDPAddr
+	IfiRecvList         []*net.Interface
+	IfiSendList         []*net.Interface
+	IfiReflectList      []*net.Interface
+	ProxyMode           bool
+	RequestSrcPortReuse bool
+	ReplySrcPortReuse   bool
+	ResponseTimeout     time.Duration
+	Logger              logging.LoggerInstance
+	mcastListener       *ipv4.PacketConn
 }
 
 type packet struct {
@@ -123,27 +125,27 @@ func (r *Relay) proxyRequest(req *packet, reflect bool, deadline time.Time, logg
 		return
 	}
 	defer conn.Close()
-	pc := ipv4.NewPacketConn(conn)
-	if err := pc.SetMulticastLoopback(false); err != nil {
+	proxyConn := ipv4.NewPacketConn(conn)
+	if err := proxyConn.SetMulticastLoopback(false); err != nil {
 		logger.Err(err).Msg("Could not disable multicast loopback on proxy socket")
 		return
 	}
 	xmitIfIndices := mapset.NewThreadUnsafeSet()
-	r.relayPacket(pc, req, reflect, xmitIfIndices, logger)
-	if err := pc.SetControlMessage(ipv4.FlagDst, true); err != nil {
+	r.relayPacket(proxyConn, req, reflect, xmitIfIndices, logger)
+	if err := proxyConn.SetControlMessage(ipv4.FlagDst, true); err != nil {
 		logger.Err(err).Msg("Could not enable Dst flag on proxy socket")
 		return
 	}
-	if err := pc.SetControlMessage(ipv4.FlagInterface, true); err != nil {
+	if err := proxyConn.SetControlMessage(ipv4.FlagInterface, true); err != nil {
 		logger.Err(err).Msg("Could not enable Interface flag on proxy socket")
 		return
 	}
-	if err := pc.SetReadDeadline(deadline); err != nil {
+	if err := proxyConn.SetReadDeadline(deadline); err != nil {
 		logger.Err(err).Msg("Could not set deadline on proxy socket")
 		return
 	}
 	for {
-		p, err := readFrom(pc)
+		p, err := readFrom(proxyConn)
 		if err != nil {
 			netErr, ok := err.(net.Error)
 			if ok && netErr != nil && netErr.Timeout() {
@@ -161,6 +163,10 @@ func (r *Relay) proxyRequest(req *packet, reflect bool, deadline time.Time, logg
 		l := ctx.Logger()
 		if xmitIfIndices.Contains(p.Ifi.Index) {
 			l.Trace().Msg("Processing proxy reply packet")
+			pc := proxyConn
+			if r.ReplySrcPortReuse && p.Src.Port == r.Group.Port {
+				pc = r.mcastListener
+			}
 			if _, err := pc.WriteTo(p.Msg, nil, req.Src); err != nil {
 				l.Err(err).Msg("Failed to forward reply to client")
 				continue
@@ -207,8 +213,8 @@ func (r *Relay) Listen() {
 		return
 	}
 	defer conn.Close()
-	pc := ipv4.NewPacketConn(conn)
-	if err := pc.SetMulticastLoopback(false); err != nil {
+	r.mcastListener = ipv4.NewPacketConn(conn)
+	if err := r.mcastListener.SetMulticastLoopback(false); err != nil {
 		r.Logger.Err(err).Msg("Could not disable multicast loopback on listener socket")
 		return
 	}
@@ -218,7 +224,7 @@ func (r *Relay) Listen() {
 		ctx = ctx.Str("interface", ifi.Name)
 		ctx = ctx.Int("ifIndex", ifi.Index)
 		l := ctx.Logger()
-		if err := pc.JoinGroup(ifi, r.Group); err != nil {
+		if err := r.mcastListener.JoinGroup(ifi, r.Group); err != nil {
 			l.Err(err).Msg("Could not join multicast group on listener socket")
 			continue
 		}
@@ -229,17 +235,17 @@ func (r *Relay) Listen() {
 	for _, ifi := range r.IfiReflectList {
 		reflectIfIndices.Add(ifi.Index)
 	}
-	if err := pc.SetControlMessage(ipv4.FlagDst, true); err != nil {
+	if err := r.mcastListener.SetControlMessage(ipv4.FlagDst, true); err != nil {
 		r.Logger.Err(err).Msg("Could not enable Dst flag on listener socket")
 		return
 	}
-	if err := pc.SetControlMessage(ipv4.FlagInterface, true); err != nil {
+	if err := r.mcastListener.SetControlMessage(ipv4.FlagInterface, true); err != nil {
 		r.Logger.Err(err).Msg("Could not enable Interface flag on listener socket")
 		return
 	}
 	r.Logger.Info().Msg("Started multicast listener")
 	for {
-		p, err := readFrom(pc)
+		p, err := readFrom(r.mcastListener)
 		if err != nil {
 			r.Logger.Err(err).Msg("Error reading from listener socket")
 			break
@@ -254,8 +260,8 @@ func (r *Relay) Listen() {
 			reflect := reflectIfIndices.Contains(p.Ifi.Index)
 			l.Trace().Msg("Processing packet destined to this relay")
 			logger := logging.Instance(l)
-			if r.SrcPortReuse && p.Src.Port == r.Group.Port {
-				r.relayPacket(pc, p, reflect, nil, logger)
+			if r.RequestSrcPortReuse && p.Src.Port == r.Group.Port {
+				r.relayPacket(r.mcastListener, p, reflect, nil, logger)
 			} else {
 				deadline := time.Now().Add(r.ResponseTimeout)
 				go r.proxyRequest(p, reflect, deadline, logger)

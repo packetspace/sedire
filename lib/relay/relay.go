@@ -169,7 +169,7 @@ func (r *Relay) Initialize() {
 
 func (r *Relay) Listen() {
 	r.Logger.Trace().Msg("Starting multicast listener")
-	if r.Validate(false) {
+	if !r.Validate(false) {
 		return
 	}
 	pc, err := listenUDP4(&net.UDPAddr{

@@ -1,0 +1,211 @@
+/*
+Copyright © 2021 Mike Joseph <mike@mjoseph.org>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package relay
+
+import (
+	"net"
+
+	"github.com/Mike-Joseph/sedire/lib/logging"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"golang.org/x/net/ipv4"
+)
+
+type packet struct {
+	Msg []byte
+	Ifi *net.Interface
+	Src *net.UDPAddr
+	Dst *net.UDPAddr
+}
+
+type packetConn struct {
+	*ipv4.PacketConn
+}
+
+type rawSend struct {
+	p *packet
+	l logging.LoggerInstance
+	s string
+}
+
+var rawSender chan *rawSend
+
+func listenUDP4(addr *net.UDPAddr) (pc packetConn, err error) {
+	conn, err := net.ListenUDP("udp4", addr)
+	if err != nil {
+		return
+	}
+	pc = packetConn{ipv4.NewPacketConn(conn)}
+	if err = pc.SetMulticastLoopback(false); err != nil {
+		pc.Close()
+		return
+	}
+	if err = pc.SetControlMessage(ipv4.FlagDst, true); err != nil {
+		pc.Close()
+		return
+	}
+	if err = pc.SetControlMessage(ipv4.FlagInterface, true); err != nil {
+		pc.Close()
+		return
+	}
+	return
+}
+
+func readFrom(pc packetConn) (p packet, err error) {
+	buf := make([]byte, 65536)
+	n, cm, src, err := pc.ReadFrom(buf)
+	if err != nil {
+		return
+	}
+	ifi, err := net.InterfaceByIndex(cm.IfIndex)
+	if err != nil {
+		return
+	}
+	p.Msg = buf[:n]
+	p.Ifi = ifi
+	p.Src = src.(*net.UDPAddr)
+	p.Dst = &net.UDPAddr{
+		IP:   cm.Dst,
+		Port: pc.LocalAddr().(*net.UDPAddr).Port,
+	}
+	return
+}
+
+func (p *packet) writeTo(pc packetConn, logger logging.LoggerInstance, success string) {
+	var cm *ipv4.ControlMessage
+	ctx := logger.With()
+	if p.Src != nil {
+		if cm == nil {
+			cm = &ipv4.ControlMessage{}
+		}
+		cm.Src = p.Src.IP
+		addr := *p.Src
+		addr.Port = pc.LocalAddr().(*net.UDPAddr).Port
+		ctx = ctx.Str("xmit_src", addr.String())
+	} else {
+		ctx = ctx.Str("xmit_src", pc.LocalAddr().String())
+	}
+	if p.Dst != nil {
+		ctx = ctx.Str("xmit_dst", p.Dst.String())
+	} else {
+		logger.Panic().Msg("relay.writeTo() called without p.Dst")
+	}
+	if p.Ifi != nil {
+		if p.Dst.IP.IsMulticast() {
+			if err := pc.SetMulticastInterface(p.Ifi); err != nil {
+				logger.Err(err).Msg("Failed to set multicast interface")
+				return
+			}
+		} else {
+			if cm == nil {
+				cm = &ipv4.ControlMessage{}
+			}
+			cm.IfIndex = p.Ifi.Index
+		}
+		ctx = ctx.Str("xmit_interface", p.Ifi.Name)
+	}
+	if p.Msg == nil {
+		logger.Panic().Msg("relay.writeTo() called without p.Msg")
+	}
+	l := ctx.Logger()
+	if _, err := pc.WriteTo(p.Msg, nil, p.Dst); err != nil {
+		l.Err(err).Msg("Failed to send packet")
+		return
+	}
+	l.Debug().Msg(success)
+}
+
+func (p *packet) sendRaw(logger logging.LoggerInstance, success string) {
+	if p.Src == nil {
+		logger.Panic().Msg("relay.sendRaw() called without p.Src")
+	}
+	if p.Dst == nil {
+		logger.Panic().Msg("relay.sendRaw() called without p.Dst")
+	}
+	if p.Msg == nil {
+		logger.Panic().Msg("relay.writeTo() called without p.Msg")
+	}
+	rawSender <- &rawSend{p: p, l: logger, s: success}
+}
+
+func StartRaw() {
+	if rawSender == nil {
+		conn, err := net.ListenIP("ip4:udp", &net.IPAddr{})
+		if err != nil {
+			logging.Logger.Fatal().Err(err).Msg("Failed to bind raw socket")
+		}
+		rc, err := ipv4.NewRawConn(conn)
+		if err != nil {
+			logging.Logger.Fatal().Err(err).Msg("Failed to create raw connection")
+		}
+		rawSender = make(chan *rawSend)
+		go rawSenderLoop(rc)
+	}
+}
+
+func rawSenderLoop(rc *ipv4.RawConn) {
+	for rs := range rawSender {
+		var cm *ipv4.ControlMessage
+		ctx := rs.l.With()
+		if rs.p.Ifi != nil {
+			if rs.p.Dst.IP.IsMulticast() {
+				if err := rc.SetMulticastInterface(rs.p.Ifi); err != nil {
+					rs.l.Err(err).Msg("Failed to set multicast interface")
+					continue
+				}
+			} else {
+				if cm == nil {
+					cm = &ipv4.ControlMessage{}
+				}
+				cm.IfIndex = rs.p.Ifi.Index
+			}
+			ctx = ctx.Str("xmit_interface", rs.p.Ifi.Name)
+		}
+		ctx = ctx.Str("xmit_src", rs.p.Src.String())
+		ctx = ctx.Str("xmit_dst", rs.p.Dst.String())
+		l := ctx.Logger()
+		buf := gopacket.NewSerializeBuffer()
+		opts := gopacket.SerializeOptions{
+			FixLengths:       true,
+			ComputeChecksums: true,
+		}
+		udp := &layers.UDP{
+			SrcPort: layers.UDPPort(rs.p.Src.Port),
+			DstPort: layers.UDPPort(rs.p.Dst.Port),
+		}
+		if err := gopacket.SerializeLayers(buf, opts, udp, gopacket.Payload(rs.p.Msg)); err != nil {
+			l.Err(err).Msg("Failed to serialize raw packet payload")
+			continue
+		}
+		payload := buf.Bytes()
+		h := &ipv4.Header{
+			Version:  ipv4.Version,
+			Len:      ipv4.HeaderLen,
+			TotalLen: ipv4.HeaderLen + len(payload),
+			TTL:      1,
+			Protocol: int(layers.IPProtocolUDP),
+			Src:      rs.p.Src.IP,
+			Dst:      rs.p.Dst.IP,
+		}
+		if err := rc.WriteTo(h, payload, nil); err != nil {
+			l.Err(err).Msg("Failed to send raw packet")
+			continue
+		}
+		l.Debug().Msg(rs.s)
+	}
+}

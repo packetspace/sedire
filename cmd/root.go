@@ -72,7 +72,8 @@ func initConfig() {
 	logging.SetStderrLevel(stderrLevel)
 	logging.SetSyslogLevel(syslogLevel)
 
-	viper.SetDefault("proxy_mode", true)
+	viper.SetDefault("proxy_requests", true)
+	viper.SetDefault("proxy_replies", true)
 	viper.SetDefault("response_timeout", "10s")
 
 	if addMDNS {
@@ -82,7 +83,7 @@ func initConfig() {
 	}
 	if addSSDP {
 		viper.SetDefault("ssdp.group", "239.255.255.250:1900")
-		viper.SetDefault("ssdp.reuse_source_port_replies", true)
+		viper.SetDefault("ssdp.proxy_replies", false)
 	}
 
 	if cfgFile != "" {
@@ -91,6 +92,7 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 	}
 
+	viper.SetEnvPrefix("sedire")
 	viper.AutomaticEnv() // read in environment variables that match
 
 	// If a config file is found, read it in.
@@ -131,18 +133,18 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 			IfiRecvList:         c.GetIfiList("receive_interfaces"),
 			IfiSendList:         c.GetIfiList("send_interfaces"),
 			IfiReflectList:      c.GetIfiList("reflect_interfaces"),
-			ProxyMode:           c.GetBool("proxy_mode"),
 			AcceptUnicast:       c.GetBool("accept_unicast"),
+			ProxyRequests:       c.GetBool("proxy_requests"),
+			ProxyReplies:        c.GetBool("proxy_replies"),
 			RequestSrcPortReuse: c.GetBool("reuse_source_port_requests"),
 			ReplySrcPortReuse:   c.GetBool("reuse_source_port_replies"),
 			ResponseTimeout:     c.GetDuration("response_timeout"),
 			Logger:              logging.Instance(l),
 		}
 		if !c.GetBool("skip_invalid") {
-			if err := relays[name].Validate(); err != nil {
-				l.Fatal().Err(err).Msg("Invalid configuration for relay")
-			}
+			relays[name].Validate(true)
 		}
+		relays[name].Initialize()
 	}
 
 	if viper.GetBool("run_if_empty") || len(relays) > 0 {

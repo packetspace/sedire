@@ -17,14 +17,12 @@ limitations under the License.
 package relay
 
 import (
-	"errors"
 	"net"
 	"time"
 
 	"github.com/Mike-Joseph/sedire/lib/logging"
 
 	mapset "github.com/deckarep/golang-set"
-	"golang.org/x/net/ipv4"
 )
 
 const IPv4mcast = "224.0.0.0"
@@ -34,113 +32,58 @@ type Relay struct {
 	IfiRecvList         []*net.Interface
 	IfiSendList         []*net.Interface
 	IfiReflectList      []*net.Interface
-	ProxyMode           bool
 	AcceptUnicast       bool
+	ProxyRequests       bool
+	ProxyReplies        bool
 	RequestSrcPortReuse bool
 	ReplySrcPortReuse   bool
 	ResponseTimeout     time.Duration
 	Logger              logging.LoggerInstance
 
-	mcastListener *ipv4.PacketConn
+	mcastListener packetConn
 }
 
-type packet struct {
-	Msg []byte
-	Ifi *net.Interface
-	Src *net.UDPAddr
-	Dst *net.UDPAddr
-}
-
-func readFrom(pc *ipv4.PacketConn) (*packet, error) {
-	buf := make([]byte, 65536)
-	n, cm, src, err := pc.ReadFrom(buf)
-	if err != nil {
-		return nil, err
+func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices mapset.Set, logger logging.LoggerInstance) {
+	recvIfIndex := p.Ifi.Index
+	p.Src = nil
+	p.Dst = r.Group
+	if reflect {
+		if r.ProxyRequests {
+			p.writeTo(pc, logger, "Reflected proxied request packet back to received interface")
+		} else {
+			p.sendRaw(logger, "Reflected native request packet back to received interface")
+		}
+		if ifIndices != nil {
+			ifIndices.Add(p.Ifi.Index)
+		}
 	}
-	ifi, err := net.InterfaceByIndex(cm.IfIndex)
-	if err != nil {
-		return nil, err
-	}
-	p := &packet{
-		Msg: buf[:n],
-		Ifi: ifi,
-		Src: src.(*net.UDPAddr),
-		Dst: &net.UDPAddr{
-			IP:   cm.Dst,
-			Port: pc.LocalAddr().(*net.UDPAddr).Port,
-		},
-	}
-	return p, nil
-}
-
-func (r *Relay) relayPacket(pc *ipv4.PacketConn, p *packet, reflect bool, ifIndices mapset.Set, logger logging.LoggerInstance) {
 	for _, ifi := range r.IfiSendList {
-		if ifi.Index != p.Ifi.Index {
-			if err := pc.SetMulticastInterface(ifi); err != nil {
-				r.Logger.Err(err).Msg("Failed to set multicast interface")
-				continue
+		if ifi.Index != recvIfIndex {
+			p.Ifi = ifi
+			if r.ProxyRequests {
+				p.writeTo(pc, logger, "Relayed request packet")
+			} else {
+				p.sendRaw(logger, "Forwarded native request packet")
 			}
-			if _, err := pc.WriteTo(p.Msg, nil, r.Group); err != nil {
-				r.Logger.Err(err).Msg("Failed to transmit message to multicast group")
-				continue
-			}
-			ctx := logger.With()
-			ctx = ctx.Str("xmit_interface", ifi.Name)
-			ctx = ctx.Str("xmit_src", pc.LocalAddr().String())
-			ctx = ctx.Str("xmit_dst", r.Group.String())
-			l := ctx.Logger()
-			l.Debug().Msg("Relayed request packet")
 			if ifIndices != nil {
 				ifIndices.Add(ifi.Index)
 			}
 		}
 	}
-	if err := pc.SetMulticastInterface(p.Ifi); err != nil {
-		r.Logger.Err(err).Msg("Failed to set multicast interface")
-		return
-	}
-	if reflect {
-		if _, err := pc.WriteTo(p.Msg, nil, r.Group); err != nil {
-			r.Logger.Err(err).Msg("Failed to reflect message back to multicast group")
-			return
-		}
-		ctx := logger.With()
-		ctx = ctx.Str("xmit_interface", p.Ifi.Name)
-		ctx = ctx.Str("xmit_src", pc.LocalAddr().String())
-		ctx = ctx.Str("xmit_dst", r.Group.String())
-		l := ctx.Logger()
-		l.Debug().Msg("Reflected request packet back to received interface")
-		if ifIndices != nil {
-			ifIndices.Add(p.Ifi.Index)
-		}
-	}
 }
 
-func (r *Relay) proxyRequest(req *packet, reflect bool, deadline time.Time, logger logging.LoggerInstance) {
+func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logger logging.LoggerInstance) {
 	logger.Trace().Time("timeout", deadline).Msg("Starting proxy")
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{})
+	proxyConn, err := listenUDP4(&net.UDPAddr{})
 	if err != nil {
-		logger.Err(err).Msg("Could not bind proxy socket")
+		logger.Err(err).Msg("Failed to initialize proxy socket")
 		return
 	}
-	defer conn.Close()
-	proxyConn := ipv4.NewPacketConn(conn)
-	if err := proxyConn.SetMulticastLoopback(false); err != nil {
-		logger.Err(err).Msg("Could not disable multicast loopback on proxy socket")
-		return
-	}
+	defer proxyConn.Close()
 	xmitIfIndices := mapset.NewThreadUnsafeSet()
-	r.relayPacket(proxyConn, req, reflect, xmitIfIndices, logger)
-	if err := proxyConn.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		logger.Err(err).Msg("Could not enable Dst flag on proxy socket")
-		return
-	}
-	if err := proxyConn.SetControlMessage(ipv4.FlagInterface, true); err != nil {
-		logger.Err(err).Msg("Could not enable Interface flag on proxy socket")
-		return
-	}
+	r.relayRequest(proxyConn, req, reflect, xmitIfIndices, logger)
 	if err := proxyConn.SetReadDeadline(deadline); err != nil {
-		logger.Err(err).Msg("Could not set deadline on proxy socket")
+		logger.Err(err).Msg("Failed to set timeout on proxy socket")
 		return
 	}
 	for {
@@ -166,68 +109,86 @@ func (r *Relay) proxyRequest(req *packet, reflect bool, deadline time.Time, logg
 			if r.ReplySrcPortReuse && p.Src.Port == r.Group.Port {
 				pc = r.mcastListener
 			}
-			if _, err := pc.WriteTo(p.Msg, nil, req.Src); err != nil {
-				l.Err(err).Msg("Failed to forward reply to client")
-				continue
+			p.Ifi = nil
+			p.Src = nil
+			p.Dst = req.Src
+			if r.ProxyReplies {
+				p.writeTo(pc, logging.Instance(l), "Relayed reply packet to client")
+			} else {
+				p.sendRaw(logging.Instance(l), "Forwarded native reply packet to client")
 			}
-			ctx = l.With()
-			ctx = ctx.Str("xmit_src", pc.LocalAddr().String())
-			ctx = ctx.Str("xmit_dst", req.Src.String())
-			l := ctx.Logger()
-			l.Debug().Msg("Relayed reply packet to client")
 		} else {
 			l.Trace().Msg("Discarding proxy reply packet received on unexpected interface")
 		}
 	}
 }
 
-func (r *Relay) Validate() error {
-	if !r.ProxyMode {
-		return errors.New("proxy mode must be enabled in current version")
+func (r *Relay) Validate(fatal bool) bool {
+	event := r.Logger.Error()
+	if fatal {
+		event = r.Logger.Fatal()
+	} else {
+		w := r.Logger.Warn()
+		if r.ProxyReplies && !r.ProxyRequests {
+			w.Msg("proxy_replies ignored without proxy_requests")
+		}
+		if r.RequestSrcPortReuse && !r.ProxyRequests {
+			w.Msg("src_port_reuse_requests ignored without proxy_requests")
+		}
+		if r.ReplySrcPortReuse && !r.ProxyReplies {
+			w.Msg("src_port_reuse_replies ignored without proxy_replies")
+		}
+		if r.RequestSrcPortReuse && !r.AcceptUnicast {
+			w.Msg("accept_unicast strongly recommended with src_port_reuse_requests")
+		}
+	}
+	e := func(msg string) bool {
+		event.Str("error", msg).Msg("Failed to start relay instance")
+		return false
 	}
 	if !r.Group.IP.IsMulticast() {
-		return errors.New("group must have a valid multicast address")
+		return e("group must have a valid multicast address")
 	}
 	if r.Group.Port <= 0 || r.Group.Port >= 65535 {
-		return errors.New("group must have a valid UDP port")
+		return e("group must have a valid UDP port")
 	}
 	if len(r.IfiRecvList) < 1 {
-		return errors.New("at least one receive interface must be defined")
+		return e("at least one receive interface must be defined")
 	}
 	if len(r.IfiSendList)+len(r.IfiReflectList) < 1 {
-		return errors.New("at least one send or reflect interface must be defined")
+		return e("at least one send or reflect interface must be defined")
 	}
-	return nil
+	return true
+}
+
+func (r *Relay) Initialize() {
+	if !r.ProxyRequests || !r.ProxyReplies {
+		StartRaw()
+	}
 }
 
 func (r *Relay) Listen() {
 	r.Logger.Trace().Msg("Starting multicast listener")
-	if err := r.Validate(); err != nil {
-		r.Logger.Err(err).Msg("Could not start multicast listener")
+	if r.Validate(false) {
 		return
 	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{
+	pc, err := listenUDP4(&net.UDPAddr{
 		IP:   net.ParseIP(IPv4mcast),
 		Port: r.Group.Port,
 	})
 	if err != nil {
-		r.Logger.Err(err).Msg("Could not bind multicast listener socket")
+		r.Logger.Err(err).Msg("Failed to initialize multicast socket")
 		return
 	}
-	defer conn.Close()
-	r.mcastListener = ipv4.NewPacketConn(conn)
-	if err := r.mcastListener.SetMulticastLoopback(false); err != nil {
-		r.Logger.Err(err).Msg("Could not disable multicast loopback on listener socket")
-		return
-	}
+	defer pc.Close()
 	recvIfIndices := mapset.NewThreadUnsafeSet()
 	for _, ifi := range r.IfiRecvList {
 		ctx := r.Logger.With()
 		ctx = ctx.Str("interface", ifi.Name)
 		ctx = ctx.Int("ifIndex", ifi.Index)
 		l := ctx.Logger()
-		if err := r.mcastListener.JoinGroup(ifi, r.Group); err != nil {
-			l.Err(err).Msg("Could not join multicast group on listener socket")
+		if err := pc.JoinGroup(ifi, r.Group); err != nil {
+			l.Err(err).Msg("Failed to join multicast group on listener socket")
 			continue
 		}
 		l.Debug().Msg("Joined multicast group on listener socket")
@@ -237,14 +198,7 @@ func (r *Relay) Listen() {
 	for _, ifi := range r.IfiReflectList {
 		reflectIfIndices.Add(ifi.Index)
 	}
-	if err := r.mcastListener.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		r.Logger.Err(err).Msg("Could not enable Dst flag on listener socket")
-		return
-	}
-	if err := r.mcastListener.SetControlMessage(ipv4.FlagInterface, true); err != nil {
-		r.Logger.Err(err).Msg("Could not enable Interface flag on listener socket")
-		return
-	}
+	r.mcastListener = pc
 	r.Logger.Info().Msg("Started multicast listener")
 	for {
 		p, err := readFrom(r.mcastListener)
@@ -262,8 +216,8 @@ func (r *Relay) Listen() {
 			reflect := reflectIfIndices.Contains(p.Ifi.Index)
 			l.Trace().Msg("Processing packet destined to this relay")
 			logger := logging.Instance(l)
-			if r.RequestSrcPortReuse && p.Src.Port == r.Group.Port {
-				r.relayPacket(r.mcastListener, p, reflect, nil, logger)
+			if !r.ProxyRequests || (r.RequestSrcPortReuse && p.Src.Port == r.Group.Port) {
+				r.relayRequest(r.mcastListener, p, reflect, nil, logger)
 			} else {
 				deadline := time.Now().Add(r.ResponseTimeout)
 				go r.proxyRequest(p, reflect, deadline, logger)

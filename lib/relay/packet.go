@@ -89,7 +89,7 @@ func readFrom(pc packetConn) (p packet, err error) {
 func (p *packet) writeTo(pc packetConn, logger logging.LoggerInstance, success string) {
 	var cm *ipv4.ControlMessage
 	ctx := logger.With()
-	if p.Src != nil {
+	if p.Src != nil && p.Src.IP != nil {
 		if cm == nil {
 			cm = &ipv4.ControlMessage{}
 		}
@@ -100,7 +100,7 @@ func (p *packet) writeTo(pc packetConn, logger logging.LoggerInstance, success s
 	} else {
 		ctx = ctx.Str("xmit_src", pc.LocalAddr().String())
 	}
-	if p.Dst != nil {
+	if p.Dst != nil && p.Dst.IP != nil {
 		ctx = ctx.Str("xmit_dst", p.Dst.String())
 	} else {
 		logger.Panic().Msg("relay.writeTo() called without p.Dst")
@@ -136,6 +136,9 @@ func (p *packet) sendRaw(logger logging.LoggerInstance, success string) {
 	}
 	if p.Dst == nil {
 		logger.Panic().Msg("relay.sendRaw() called without p.Dst")
+	}
+	if p.Dst.IP == nil {
+		logger.Panic().Msg("relay.sendRaw() called without p.Dst.IP")
 	}
 	if p.Msg == nil {
 		logger.Panic().Msg("relay.writeTo() called without p.Msg")

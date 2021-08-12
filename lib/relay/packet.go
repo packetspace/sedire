@@ -153,7 +153,8 @@ func (p *packet) sendRaw(logger logging.LoggerInstance, success string) {
 
 func StartRaw() {
 	if rawSender == nil {
-		conn, err := net.ListenIP(fmt.Sprintf("ip4:%d", syscall.IPPROTO_RAW), &net.IPAddr{})
+		protocol := fmt.Sprintf("ip4:%d", syscall.IPPROTO_RAW)
+		conn, err := net.ListenIP(protocol, &net.IPAddr{})
 		if err != nil {
 			logging.Logger.Fatal().Err(err).Msg("Failed to bind raw socket")
 		}

@@ -17,7 +17,9 @@ limitations under the License.
 package relay
 
 import (
+	"fmt"
 	"net"
+	"syscall"
 
 	"github.com/Mike-Joseph/sedire/lib/logging"
 
@@ -151,7 +153,7 @@ func (p *packet) sendRaw(logger logging.LoggerInstance, success string) {
 
 func StartRaw() {
 	if rawSender == nil {
-		conn, err := net.ListenIP("ip4:udp", &net.IPAddr{})
+		conn, err := net.ListenIP(fmt.Sprintf("ip4:%d", syscall.IPPROTO_RAW), &net.IPAddr{})
 		if err != nil {
 			logging.Logger.Fatal().Err(err).Msg("Failed to bind raw socket")
 		}

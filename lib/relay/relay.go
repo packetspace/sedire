@@ -45,8 +45,10 @@ type Relay struct {
 
 func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices mapset.Set, logger logging.LoggerInstance) {
 	recvIfIndex := p.Ifi.Index
-	p.Src = &net.UDPAddr{Port: pc.LocalAddr().(*net.UDPAddr).Port}
 	p.Dst = r.Group
+	if r.ProxyRequests {
+		p.Src = nil
+	}
 	if reflect {
 		if r.ProxyRequests {
 			p.writeTo(pc, logger, "Reflected proxied request packet back to received interface")
@@ -110,9 +112,9 @@ func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logge
 				pc = r.mcastListener
 			}
 			p.Ifi = nil
-			p.Src = &net.UDPAddr{Port: pc.LocalAddr().(*net.UDPAddr).Port}
 			p.Dst = req.Src
 			if r.ProxyReplies {
+				p.Src = nil
 				p.writeTo(pc, logging.Instance(l), "Relayed reply packet to client")
 			} else {
 				p.sendRaw(logging.Instance(l), "Forwarded native reply packet to client")

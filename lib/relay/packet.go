@@ -134,6 +134,9 @@ func (p *packet) sendRaw(logger logging.LoggerInstance, success string) {
 	if p.Src == nil {
 		logger.Panic().Msg("relay.sendRaw() called without p.Src")
 	}
+	if p.Src.IP == nil {
+		logger.Panic().Msg("relay.sendRaw() called without p.Src.IP")
+	}
 	if p.Dst == nil {
 		logger.Panic().Msg("relay.sendRaw() called without p.Dst")
 	}

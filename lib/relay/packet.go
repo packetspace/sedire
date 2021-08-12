@@ -191,19 +191,29 @@ func rawSenderLoop(rc *ipv4.RawConn) {
 			SrcPort: layers.UDPPort(rs.p.Src.Port),
 			DstPort: layers.UDPPort(rs.p.Dst.Port),
 		}
+		ip := &layers.IPv4{
+			Version:  ipv4.Version,
+			TTL:      1,
+			Protocol: layers.IPProtocolUDP,
+			SrcIP:    rs.p.Src.IP,
+			DstIP:    rs.p.Dst.IP,
+		}
+		if err := udp.SetNetworkLayerForChecksum(ip); err != nil {
+			l.Err(err).Msg("Failed to set UDP/IP layer in raw packet")
+		}
 		if err := gopacket.SerializeLayers(buf, opts, udp, gopacket.Payload(rs.p.Msg)); err != nil {
 			l.Err(err).Msg("Failed to serialize raw packet payload")
 			continue
 		}
 		payload := buf.Bytes()
 		h := &ipv4.Header{
-			Version:  ipv4.Version,
+			Version:  int(ip.Version),
 			Len:      ipv4.HeaderLen,
 			TotalLen: ipv4.HeaderLen + len(payload),
-			TTL:      1,
-			Protocol: int(layers.IPProtocolUDP),
-			Src:      rs.p.Src.IP,
-			Dst:      rs.p.Dst.IP,
+			TTL:      int(ip.TTL),
+			Protocol: int(ip.Protocol),
+			Src:      ip.SrcIP,
+			Dst:      ip.DstIP,
 		}
 		if err := rc.WriteTo(h, payload, nil); err != nil {
 			l.Err(err).Msg("Failed to send raw packet")

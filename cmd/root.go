@@ -27,12 +27,15 @@ import (
 	"github.com/spf13/viper"
 )
 
+const (
+	stderrLevel = "info"
+	syslogLevel = "disabled"
+)
+
 var (
-	cfgFile     string
-	stderrLevel string
-	syslogLevel string
-	addSSDP     bool
-	addMDNS     bool
+	cfgFile string
+	addSSDP bool
+	addMDNS bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -57,20 +60,35 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 	pf := rootCmd.PersistentFlags()
-	pf.StringVarP(&cfgFile, "config", "c", "", "config file")
-	pf.StringVarP(&stderrLevel, "stderr", "s", "info", "stderr logging level")
-	pf.StringVarP(&syslogLevel, "syslog", "l", "disabled", "syslog logging level")
-	pf.BoolVarP(&addMDNS, "mdns", "M", false, "enable automatic handling for mDNS packets")
-	pf.BoolVarP(&addSSDP, "ssdp", "S", false, "enable automatic handling for SSDP packets")
+	pf.StringVarP(&cfgFile, "config-file", "c", "", "config file")
+	pf.StringP("stderr-level", "s", stderrLevel, "stderr logging level")
+	pf.StringP("syslog-level", "l", syslogLevel, "syslog logging level")
+	viper.BindPFlag(".stderr_level", pf.Lookup("stderr"))
+	viper.BindPFlag(".syslog_level", pf.Lookup("syslog"))
+	pf.BoolVarP(&addMDNS, "enable-mdns", "M", false, "enable automatic handling for mDNS packets")
+	pf.BoolVarP(&addSSDP, "enable-ssdp", "S", false, "enable automatic handling for SSDP packets")
 	pf.StringArrayP("interface", "i", nil, "interface to use as both send and receive")
 	viper.BindPFlag("send_interfaces", pf.Lookup("interface"))
 	viper.BindPFlag("receive_interfaces", pf.Lookup("interface"))
 }
 
+func initLogging(warn bool) {
+	var err error
+	c := config.Config{Override: viper.Sub("")}
+	err = logging.Main.Stderr.SetLevel(c.GetString("stderr_level"))
+	if warn && err != nil {
+		defer logging.Main.Warn().Err(err).Msg("Unable to set STDERR logging level")
+	}
+	err = logging.Main.Syslog.SetLevel(c.GetString("syslog_level"))
+	if warn && err != nil {
+		defer logging.Main.Warn().Err(err).Msg("Unable to set syslog logging level")
+	}
+}
+
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	logging.Main.Stderr.SetLevel(stderrLevel)
-	logging.Main.Syslog.SetLevel(syslogLevel)
+	viper.SetDefault("stderr_level", stderrLevel)
+	viper.SetDefault("syslog_level", syslogLevel)
 
 	viper.SetDefault("proxy_requests", true)
 	viper.SetDefault("proxy_replies", true)
@@ -97,8 +115,10 @@ func initConfig() {
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		logging.Main.Info().Msgf("Using config file: %s", viper.ConfigFileUsed())
+		defer logging.Main.Info().Msgf("Using config file: %s", viper.ConfigFileUsed())
 	}
+
+	initLogging(false)
 }
 
 func rootCmdRun(cmd *cobra.Command, args []string) {
@@ -109,6 +129,10 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		}
 		viper.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
+
+	// Repeat initialization of logging in case the commandline parsing
+	// changed the logging levels.
+	initLogging(true)
 
 	relays := make(map[string]*relay.Relay)
 	override := viper.Sub("")
@@ -124,10 +148,20 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		}
 		c := config.Config{Child: sub, Override: override}
 		g := c.GetUDP4Addr("group")
-		ctx := logging.Main.With()
+		li, err := logging.NewInstance()
+		ctx := li.With()
 		ctx = ctx.Str("relay", name)
 		ctx = ctx.Str("group", g.String())
-		l := logging.CtxLogger(ctx)
+		logger := logging.CtxLogger(ctx)
+		if err != nil {
+			logger.Err(err).Msg("Failed to cre for relay")
+		}
+		if err := li.Stderr.SetLevel(c.GetString("stderr_level")); err != nil {
+			defer logger.Warn().Err(err).Msg("Unable to set STDERR logging level for relay")
+		}
+		if err := li.Syslog.SetLevel(c.GetString("syslog_level")); err != nil {
+			defer logger.Warn().Err(err).Msg("Unable to set syslog logging level for relay")
+		}
 		relays[name] = &relay.Relay{
 			Group:               g,
 			IfiRecvList:         c.GetIfiList("receive_interfaces"),
@@ -139,7 +173,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 			RequestSrcPortReuse: c.GetBool("reuse_source_port_requests"),
 			ReplySrcPortReuse:   c.GetBool("reuse_source_port_replies"),
 			ResponseTimeout:     c.GetDuration("response_timeout"),
-			Logger:              l,
+			Logger:              logger,
 		}
 		if !c.GetBool("skip_invalid") {
 			relays[name].Validate(true)

@@ -28,8 +28,9 @@ import (
 )
 
 const (
-	stderrLevel = "info"
-	syslogLevel = "disabled"
+	globalPrefix       = ""
+	stderrDefaultLevel = "info"
+	syslogDefaultLevel = "disabled"
 )
 
 var (
@@ -61,10 +62,8 @@ func init() {
 	// will be global for your application.
 	pf := rootCmd.PersistentFlags()
 	pf.StringVarP(&cfgFile, "config-file", "c", "", "config file")
-	pf.StringP("stderr-level", "s", stderrLevel, "stderr logging level")
-	pf.StringP("syslog-level", "l", syslogLevel, "syslog logging level")
-	viper.BindPFlag(".stderr_level", pf.Lookup("stderr-level"))
-	viper.BindPFlag(".syslog_level", pf.Lookup("syslog-level"))
+	pf.StringP("stderr-level", "s", stderrDefaultLevel, "stderr logging level")
+	pf.StringP("syslog-level", "l", syslogDefaultLevel, "syslog logging level")
 	pf.BoolVarP(&addMDNS, "enable-mdns", "M", false, "enable automatic handling for mDNS packets")
 	pf.BoolVarP(&addSSDP, "enable-ssdp", "S", false, "enable automatic handling for SSDP packets")
 	pf.StringArrayP("interface", "i", nil, "interface to use as both send and receive")
@@ -74,7 +73,7 @@ func init() {
 
 func initLogging(warn bool) {
 	var err error
-	c := config.Config{Override: viper.Sub("")}
+	c := config.Config{Override: viper.Sub(globalPrefix)}
 	err = logging.Main.Stderr.SetLevel(c.GetString("stderr_level"))
 	if warn && err != nil {
 		defer logging.Main.Warn().Err(err).Msg("Unable to set STDERR logging level")
@@ -87,8 +86,16 @@ func initLogging(warn bool) {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	viper.SetDefault("stderr_level", stderrLevel)
-	viper.SetDefault("syslog_level", syslogLevel)
+	pf := rootCmd.PersistentFlags()
+
+	viper.SetDefault("stderr_level", stderrDefaultLevel)
+	viper.SetDefault("syslog_level", syslogDefaultLevel)
+	if flag := pf.Lookup("stderr-level"); flag.Changed {
+		viper.SetDefault(globalPrefix+".stderr_level", flag.Value.String())
+	}
+	if flag := pf.Lookup("syslog-level"); flag.Changed {
+		viper.SetDefault(globalPrefix+".syslog_level", flag.Value.String())
+	}
 
 	viper.SetDefault("proxy_requests", true)
 	viper.SetDefault("proxy_replies", true)
@@ -135,13 +142,16 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 	initLogging(true)
 
 	relays := make(map[string]*relay.Relay)
-	override := viper.Sub("")
+	override := viper.Sub(globalPrefix)
 	for _, k := range viper.AllKeys() {
 		parts := strings.Split(k, ".")
 		if len(parts) <= 1 {
 			continue
 		}
 		name := parts[0]
+		if name == globalPrefix {
+			continue
+		}
 		sub := viper.Sub(name)
 		if sub == nil {
 			continue

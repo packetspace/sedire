@@ -71,7 +71,7 @@ func logMessageFormatter(msg interface{}) string {
 	if msg == nil {
 		return ""
 	}
-	return fmt.Sprint(msg, " ", fmtMarker)
+	return fmt.Sprint(msg, fmtMarker)
 }
 
 func init() {
@@ -141,9 +141,16 @@ func newLogFormatter(w io.Writer) *logFormatter {
 func (lf *logFormatter) formatEvent(p []byte) (b []byte, n int, err error) {
 	lf.buf.Reset()
 	n, err = lf.cw.Write(p)
-	lf.buf.WriteString(")")
-	marker := []byte(fmtMarker + " ")
-	b = bytes.Replace(lf.buf.Bytes(), marker, []byte("("), 1)
+	parts := bytes.SplitN(lf.buf.Bytes(), []byte(fmtMarker), 1)
+	var newBuf bytes.Buffer
+	newBuf.Write(bytes.TrimSpace(parts[0]))
+	if len(parts) > 1 {
+		newBuf.WriteRune(' ')
+		newBuf.WriteRune('(')
+		newBuf.Write(bytes.TrimSpace(parts[1]))
+		newBuf.WriteRune(')')
+	}
+	b = newBuf.Bytes()
 	return
 }
 

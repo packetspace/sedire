@@ -17,33 +17,12 @@ limitations under the License.
 package logging
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-	"log/syslog"
-	"os"
-	"sync/atomic"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/rs/zerolog"
 )
 
-const (
-	SyslogFacility     = syslog.LOG_DAEMON
-	SyslogDefaultLevel = syslog.LOG_INFO
-	fmtMarker          = "\f"
-)
-
-type writerFilter struct {
-	writer io.Writer
-	level  int32
-}
-
-type logFormatter struct {
-	writer io.Writer
-	cw     zerolog.ConsoleWriter
-}
+const timeFormat = time.StampMilli
 
 type LoggerInstance struct {
 	zerolog.Logger
@@ -59,37 +38,17 @@ var timestampHook = zerolog.HookFunc(func(e *zerolog.Event, _ zerolog.Level, _ s
 	e.Timestamp()
 })
 
-func consoleMessageFormatter(msg interface{}) string {
-	if msg == nil {
-		return ""
-	}
-	return color.New(color.BgBlue).Sprint(msg)
-}
-
-func logMessageFormatter(msg interface{}) string {
-	if msg == nil {
-		return ""
-	}
-	return fmt.Sprint(msg, fmtMarker)
-}
-
 func init() {
-	zerolog.TimeFieldFormat = time.StampMilli
-	cw := zerolog.NewConsoleWriter()
-	cw.Out = os.Stderr
-	cw.TimeFormat = time.StampMilli
-	cw.FormatMessage = consoleMessageFormatter
-	stderrWriter = &writerFilter{
-		writer: cw,
-		level:  int32(zerolog.Disabled),
-	}
-	sl, err := syslog.New(SyslogFacility|SyslogDefaultLevel, "")
-	lf := newLogFormatter(zerolog.SyslogLevelWriter(sl))
+	zerolog.TimeFieldFormat = timeFormat
+	cw, err := newConsoleWriter()
 	if err == nil {
-		syslogWriter = &writerFilter{
-			writer: lf,
-			level:  int32(zerolog.Disabled),
-		}
+		stderrWriter = cw
+	} else {
+		defer Logger.Err(err).Msg("Unable to setup console logger")
+	}
+	sw, err := newSyslogWriter()
+	if err == nil {
+		syslogWriter = sw
 	} else {
 		defer Logger.Err(err).Msg("Unable to connect to syslog")
 	}
@@ -101,85 +60,10 @@ func Instance(logger zerolog.Logger) LoggerInstance {
 	return LoggerInstance{logger}
 }
 
-func (wf *writerFilter) Write(p []byte) (int, error) {
-	if wf == nil || atomic.LoadInt32(&wf.level) >= int32(zerolog.Disabled) {
-		return len(p), nil
-	}
-	return wf.writer.Write(p)
-}
-
-func (wf *writerFilter) WriteLevel(l zerolog.Level, p []byte) (int, error) {
-	if wf == nil || int32(l) < atomic.LoadInt32(&wf.level) {
-		return len(p), nil
-	}
-	if lw, ok := wf.writer.(zerolog.LevelWriter); ok {
-		return lw.WriteLevel(l, p)
-	}
-	return wf.writer.Write(p)
-}
-
-func (wf *writerFilter) setLevel(level string) error {
-	l, err := zerolog.ParseLevel(level)
-	if err == nil {
-		atomic.StoreInt32(&wf.level, int32(l))
-	}
-	return err
-}
-
-func newLogFormatter(w io.Writer) *logFormatter {
-	var lf logFormatter
-	lf.writer = w
-	lf.cw = zerolog.NewConsoleWriter()
-	lf.cw.Out = nil
-	lf.cw.NoColor = true
-	lf.cw.PartsOrder = []string{zerolog.MessageFieldName}
-	lf.cw.FormatMessage = logMessageFormatter
-	return &lf
-}
-
-func (lf *logFormatter) formatEvent(p []byte) (b []byte, n int, err error) {
-	var cwBuf, lfBuf bytes.Buffer
-	lf.cw.Out = &cwBuf
-	n, err = lf.cw.Write(p)
-	parts := bytes.SplitN(cwBuf.Bytes(), []byte(fmtMarker), 2)
-	lfBuf.Write(bytes.TrimSpace(parts[0]))
-	if len(parts) == 2 {
-		lfBuf.WriteRune(' ')
-		lfBuf.WriteRune('(')
-		lfBuf.Write(bytes.TrimSpace(parts[1]))
-		lfBuf.WriteRune(')')
-	}
-	b = lfBuf.Bytes()
-	lf.cw.Out = nil
-	return
-}
-
-func (lf *logFormatter) Write(p []byte) (int, error) {
-	b, n, err := lf.formatEvent(p)
-	if err != nil {
-		return 0, err
-	}
-	_, err = lf.writer.Write(b)
-	return n, err
-}
-
-func (lf *logFormatter) WriteLevel(l zerolog.Level, p []byte) (int, error) {
-	b, n, err := lf.formatEvent(p)
-	if err != nil {
-		return 0, err
-	}
-	if lw, ok := lf.writer.(zerolog.LevelWriter); ok {
-		_, err = lw.WriteLevel(l, b)
-	} else {
-		_, err = lf.writer.Write(b)
-	}
-	return n, err
-}
-
 func SetStderrLevel(level string) error {
-	return stderrWriter.setLevel(level)
+	return stderrWriter.SetLevel(level)
 }
 
 func SetSyslogLevel(level string) error {
-	return syslogWriter.setLevel(level)
+	return syslogWriter.SetLevel(level)
 }

@@ -38,12 +38,12 @@ type Relay struct {
 	RequestSrcPortReuse bool
 	ReplySrcPortReuse   bool
 	ResponseTimeout     time.Duration
-	Logger              logging.LoggerInstance
+	Logger              logging.Logger
 
 	mcastListener packetConn
 }
 
-func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices mapset.Set, logger logging.LoggerInstance) {
+func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices mapset.Set, logger logging.Logger) {
 	recvIfIndex := p.Ifi.Index
 	p.Dst = r.Group
 	if r.ProxyRequests {
@@ -74,7 +74,7 @@ func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices ma
 	}
 }
 
-func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logger logging.LoggerInstance) {
+func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logger logging.Logger) {
 	logger.Trace().Time("timeout", deadline).Msg("Starting proxy")
 	proxyConn, err := listenUDP4(&net.UDPAddr{})
 	if err != nil {
@@ -104,7 +104,7 @@ func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logge
 		ctx = ctx.Str("reply_src_address", p.Src.String())
 		ctx = ctx.Str("reply_dst_address", p.Dst.String())
 		ctx = ctx.Int("reply_packet_size", len(p.Msg))
-		l := ctx.Logger()
+		l := logging.CtxLogger(ctx)
 		if xmitIfIndices.Contains(p.Ifi.Index) {
 			l.Trace().Msg("Processing proxy reply packet")
 			pc := proxyConn
@@ -115,9 +115,9 @@ func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logge
 			p.Dst = req.Src
 			if r.ProxyReplies {
 				p.Src = nil
-				p.writeTo(pc, logging.Instance(l), "Relayed reply packet to client")
+				p.writeTo(pc, l, "Relayed reply packet to client")
 			} else {
-				p.sendRaw(logging.Instance(l), "Forwarded native reply packet to client")
+				p.sendRaw(l, "Forwarded native reply packet to client")
 			}
 		} else {
 			l.Trace().Msg("Discarding proxy reply packet received on unexpected interface")
@@ -188,7 +188,7 @@ func (r *Relay) Listen() {
 		ctx := r.Logger.With()
 		ctx = ctx.Str("interface", ifi.Name)
 		ctx = ctx.Int("ifIndex", ifi.Index)
-		l := ctx.Logger()
+		l := logging.CtxLogger(ctx)
 		if err := pc.JoinGroup(ifi, r.Group); err != nil {
 			l.Err(err).Msg("Failed to join multicast group on listener socket")
 			continue
@@ -213,16 +213,15 @@ func (r *Relay) Listen() {
 		ctx = ctx.Str("request_src", p.Src.String())
 		ctx = ctx.Str("request_dst", p.Dst.String())
 		ctx = ctx.Int("request_packet_size", len(p.Msg))
-		l := ctx.Logger()
+		l := logging.CtxLogger(ctx)
 		if (p.Dst.IP.Equal(r.Group.IP) || (r.AcceptUnicast && p.Dst.IP.IsGlobalUnicast())) && recvIfIndices.Contains(p.Ifi.Index) {
 			reflect := reflectIfIndices.Contains(p.Ifi.Index)
 			l.Trace().Msg("Processing packet destined to this relay")
-			logger := logging.Instance(l)
 			if !r.ProxyRequests || (r.RequestSrcPortReuse && p.Src.Port == r.Group.Port) {
-				r.relayRequest(r.mcastListener, p, reflect, nil, logger)
+				r.relayRequest(r.mcastListener, p, reflect, nil, l)
 			} else {
 				deadline := time.Now().Add(r.ResponseTimeout)
-				go r.proxyRequest(p, reflect, deadline, logger)
+				go r.proxyRequest(p, reflect, deadline, l)
 			}
 		} else {
 			l.Trace().Msg("Discarding packet not destined to this relay")

@@ -64,7 +64,7 @@ func (c Config) GetUDP4Addr(key string) *net.UDPAddr {
 	str := c.GetString(key)
 	addr, err := net.ResolveUDPAddr("udp4", str)
 	if err != nil {
-		logging.Logger.Err(err).Msgf("Unable to parse group address: %s", str)
+		logging.Main.Err(err).Msgf("Unable to parse group address: %s", str)
 	}
 	return addr
 }
@@ -75,7 +75,7 @@ func (c Config) GetIfiList(key string) []*net.Interface {
 	for _, name := range strList {
 		ifi, err := net.InterfaceByName(name)
 		if err != nil {
-			logging.Logger.Err(err).Msgf("Interface not found: %s", name)
+			logging.Main.Err(err).Msgf("Interface not found: %s", name)
 			continue
 		}
 		ifiList = append(ifiList, ifi)

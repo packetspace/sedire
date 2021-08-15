@@ -17,6 +17,7 @@ limitations under the License.
 package logging
 
 import (
+	"io/ioutil"
 	"log/syslog"
 
 	"github.com/rs/zerolog"
@@ -28,10 +29,11 @@ const (
 )
 
 func newSyslogWriter() (wf *writerFilter, err error) {
+	w := ioutil.Discard
 	sl, err := syslog.New(SyslogFacility|SyslogDefaultLevel, "")
-	lf := newLogFormatter(zerolog.SyslogLevelWriter(sl))
 	if err == nil {
-		wf = newWriterFilter(lf)
+		w = newLogFormatter(zerolog.SyslogLevelWriter(sl))
 	}
+	wf = newWriterFilter(w)
 	return
 }

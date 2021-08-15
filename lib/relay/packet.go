@@ -41,7 +41,7 @@ type packetConn struct {
 
 type rawSend struct {
 	p *packet
-	l logging.LoggerInstance
+	l logging.Logger
 	s string
 }
 
@@ -88,7 +88,7 @@ func readFrom(pc packetConn) (p packet, err error) {
 	return
 }
 
-func (p *packet) writeTo(pc packetConn, logger logging.LoggerInstance, success string) {
+func (p *packet) writeTo(pc packetConn, logger logging.Logger, success string) {
 	var cm *ipv4.ControlMessage
 	ctx := logger.With()
 	if p.Src != nil && p.Src.IP != nil {
@@ -124,7 +124,7 @@ func (p *packet) writeTo(pc packetConn, logger logging.LoggerInstance, success s
 	if p.Msg == nil {
 		logger.Panic().Msg("relay.writeTo() called without p.Msg")
 	}
-	l := ctx.Logger()
+	l := logging.CtxLogger(ctx)
 	if _, err := pc.WriteTo(p.Msg, nil, p.Dst); err != nil {
 		l.Err(err).Msg("Failed to send packet")
 		return
@@ -132,7 +132,7 @@ func (p *packet) writeTo(pc packetConn, logger logging.LoggerInstance, success s
 	l.Debug().Msg(success)
 }
 
-func (p *packet) sendRaw(logger logging.LoggerInstance, success string) {
+func (p *packet) sendRaw(logger logging.Logger, success string) {
 	if p.Src == nil {
 		logger.Panic().Msg("relay.sendRaw() called without p.Src")
 	}
@@ -156,11 +156,11 @@ func StartRaw() {
 		protocol := fmt.Sprintf("ip4:%d", syscall.IPPROTO_RAW)
 		conn, err := net.ListenIP(protocol, &net.IPAddr{})
 		if err != nil {
-			logging.Logger.Fatal().Err(err).Msg("Failed to bind raw socket")
+			logging.Main.Fatal().Err(err).Msg("Failed to bind raw socket")
 		}
 		rc, err := ipv4.NewRawConn(conn)
 		if err != nil {
-			logging.Logger.Fatal().Err(err).Msg("Failed to create raw connection")
+			logging.Main.Fatal().Err(err).Msg("Failed to create raw connection")
 		}
 		rawSender = make(chan *rawSend)
 		go rawSenderLoop(rc)
@@ -187,7 +187,7 @@ func rawSenderLoop(rc *ipv4.RawConn) {
 		}
 		ctx = ctx.Str("xmit_src", rs.p.Src.String())
 		ctx = ctx.Str("xmit_dst", rs.p.Dst.String())
-		l := ctx.Logger()
+		l := logging.CtxLogger(ctx)
 		buf := gopacket.NewSerializeBuffer()
 		opts := gopacket.SerializeOptions{
 			FixLengths:       true,

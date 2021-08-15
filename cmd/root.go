@@ -69,8 +69,8 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	logging.SetStderrLevel(stderrLevel)
-	logging.SetSyslogLevel(syslogLevel)
+	logging.Main.Stderr.SetLevel(stderrLevel)
+	logging.Main.Syslog.SetLevel(syslogLevel)
 
 	viper.SetDefault("proxy_requests", true)
 	viper.SetDefault("proxy_replies", true)
@@ -97,7 +97,7 @@ func initConfig() {
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		logging.Logger.Info().Msgf("Using config file: %s", viper.ConfigFileUsed())
+		logging.Main.Info().Msgf("Using config file: %s", viper.ConfigFileUsed())
 	}
 }
 
@@ -105,7 +105,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 	for _, arg := range args {
 		parts := strings.SplitN(arg, "=", 2)
 		if len(parts) != 2 {
-			logging.Logger.Fatal().Msgf("Unable to parse argument: %s", arg)
+			logging.Main.Fatal().Msgf("Unable to parse argument: %s", arg)
 		}
 		viper.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
@@ -124,10 +124,10 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		}
 		c := config.Config{Child: sub, Override: override}
 		g := c.GetUDP4Addr("group")
-		ctx := logging.Logger.With()
+		ctx := logging.Main.With()
 		ctx = ctx.Str("relay", name)
 		ctx = ctx.Str("group", g.String())
-		l := ctx.Logger()
+		l := logging.CtxLogger(ctx)
 		relays[name] = &relay.Relay{
 			Group:               g,
 			IfiRecvList:         c.GetIfiList("receive_interfaces"),
@@ -139,7 +139,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 			RequestSrcPortReuse: c.GetBool("reuse_source_port_requests"),
 			ReplySrcPortReuse:   c.GetBool("reuse_source_port_replies"),
 			ResponseTimeout:     c.GetDuration("response_timeout"),
-			Logger:              logging.Instance(l),
+			Logger:              l,
 		}
 		if !c.GetBool("skip_invalid") {
 			relays[name].Validate(true)
@@ -153,5 +153,5 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		}
 		select {}
 	}
-	logging.Logger.Fatal().Msg("Nothing to do")
+	logging.Main.Fatal().Msg("Nothing to do")
 }

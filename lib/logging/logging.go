@@ -17,22 +17,30 @@ limitations under the License.
 package logging
 
 import (
+	"io"
 	"time"
 
 	"github.com/rs/zerolog"
 )
 
-const timeFormat = time.StampMilli
+const (
+	InitStderrLevel = "warn"
+	timeFormat      = time.StampMilli
+)
 
-type LoggerInstance struct {
+type Logger struct {
 	zerolog.Logger
 }
 
-var (
-	Logger       LoggerInstance
-	stderrWriter *writerFilter
-	syslogWriter *writerFilter
-)
+type Instance struct {
+	Logger
+	Stdout      *writerFilter
+	Stderr      *writerFilter
+	Syslog      *writerFilter
+	multiWriter zerolog.LevelWriter
+}
+
+var Main Instance
 
 var timestampHook = zerolog.HookFunc(func(e *zerolog.Event, _ zerolog.Level, _ string) {
 	e.Timestamp()
@@ -40,30 +48,32 @@ var timestampHook = zerolog.HookFunc(func(e *zerolog.Event, _ zerolog.Level, _ s
 
 func init() {
 	zerolog.TimeFieldFormat = timeFormat
-	cw, err := newConsoleWriter()
-	if err == nil {
-		stderrWriter = cw
-	} else {
-		defer Logger.Err(err).Msg("Unable to setup console logger")
+	i, err := NewInstance()
+	if err != nil {
+		defer Main.Err(err).Msg("Unable to setup main logger")
 	}
-	sw, err := newSyslogWriter()
+	// This level is used only for errors during initialization and is later
+	// reset by the program during argument/config parsing.
+	i.Stderr.SetLevel(InitStderrLevel)
+	Main = i
+}
+
+func BaseLogger(i io.Writer) Logger {
+	return Logger{zerolog.New(i).Hook(timestampHook)}
+}
+
+func CtxLogger(ctx zerolog.Context) Logger {
+	return Logger{ctx.Logger()}
+}
+
+func NewInstance() (i Instance, err error) {
 	if err == nil {
-		syslogWriter = sw
-	} else {
-		defer Logger.Err(err).Msg("Unable to connect to syslog")
+		i.Stderr, err = newConsoleWriter()
 	}
-	mw := zerolog.MultiLevelWriter(stderrWriter, syslogWriter)
-	Logger = Instance(zerolog.New(mw).Hook(timestampHook))
-}
-
-func Instance(logger zerolog.Logger) LoggerInstance {
-	return LoggerInstance{logger}
-}
-
-func SetStderrLevel(level string) error {
-	return stderrWriter.SetLevel(level)
-}
-
-func SetSyslogLevel(level string) error {
-	return syslogWriter.SetLevel(level)
+	if err == nil {
+		i.Syslog, err = newSyslogWriter()
+	}
+	i.multiWriter = zerolog.MultiLevelWriter(i.Stderr, i.Syslog)
+	i.Logger = BaseLogger(i.multiWriter)
+	return
 }

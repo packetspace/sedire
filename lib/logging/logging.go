@@ -141,7 +141,7 @@ func newLogFormatter(w io.Writer) *logFormatter {
 func (lf *logFormatter) formatEvent(p []byte) (b []byte, n int, err error) {
 	lf.buf.Reset()
 	n, err = lf.cw.Write(p)
-	parts := bytes.SplitN(lf.buf.Bytes(), []byte(fmtMarker), 1)
+	parts := bytes.SplitN(lf.buf.Bytes(), []byte(fmtMarker), 2)
 	var newBuf bytes.Buffer
 	newBuf.Write(bytes.TrimSpace(parts[0]))
 	if len(parts) > 1 {

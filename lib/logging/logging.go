@@ -17,8 +17,11 @@ limitations under the License.
 package logging
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"log/syslog"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -29,11 +32,18 @@ import (
 const (
 	SyslogFacility     = syslog.LOG_DAEMON
 	SyslogDefaultLevel = syslog.LOG_INFO
+	fmtMarker          = "\f"
 )
 
 type writerFilter struct {
 	writer io.Writer
 	level  int32
+}
+
+type logFormatter struct {
+	writer io.Writer
+	cw     zerolog.ConsoleWriter
+	buf    bytes.Buffer
 }
 
 type LoggerInstance struct {
@@ -50,26 +60,35 @@ var timestampHook = zerolog.HookFunc(func(e *zerolog.Event, _ zerolog.Level, _ s
 	e.Timestamp()
 })
 
-func messageFormatter(msg interface{}) string {
+func consoleMessageFormatter(msg interface{}) string {
 	if msg == nil {
 		return ""
 	}
 	return color.New(color.BgBlue).Sprint(msg)
 }
 
+func logMessageFormatter(msg interface{}) string {
+	if msg == nil {
+		return ""
+	}
+	return fmt.Sprint(msg, " ", fmtMarker)
+}
+
 func init() {
 	zerolog.TimeFieldFormat = time.StampMilli
 	cw := zerolog.NewConsoleWriter()
+	cw.Out = os.Stderr
 	cw.TimeFormat = time.StampMilli
-	cw.FormatMessage = messageFormatter
+	cw.FormatMessage = consoleMessageFormatter
 	stderrWriter = &writerFilter{
 		writer: cw,
 		level:  int32(zerolog.Disabled),
 	}
 	sl, err := syslog.New(SyslogFacility|SyslogDefaultLevel, "")
+	lf := newLogFormatter(zerolog.SyslogLevelWriter(sl))
 	if err == nil {
 		syslogWriter = &writerFilter{
-			writer: zerolog.SyslogLevelWriter(sl),
+			writer: lf,
 			level:  int32(zerolog.Disabled),
 		}
 	} else {
@@ -106,6 +125,48 @@ func (wf *writerFilter) setLevel(level string) error {
 		atomic.StoreInt32(&wf.level, int32(l))
 	}
 	return err
+}
+
+func newLogFormatter(w io.Writer) *logFormatter {
+	var lf logFormatter
+	lf.writer = w
+	lf.cw = zerolog.NewConsoleWriter()
+	lf.cw.Out = &lf.buf
+	lf.cw.NoColor = true
+	lf.cw.PartsOrder = []string{zerolog.MessageFieldName}
+	lf.cw.FormatMessage = logMessageFormatter
+	return &lf
+}
+
+func (lf *logFormatter) formatEvent(p []byte) (b []byte, n int, err error) {
+	lf.buf.Reset()
+	n, err = lf.cw.Write(p)
+	lf.buf.WriteString(")")
+	marker := []byte(fmtMarker + " ")
+	b = bytes.Replace(lf.buf.Bytes(), marker, []byte("("), 1)
+	return
+}
+
+func (lf *logFormatter) Write(p []byte) (int, error) {
+	b, n, err := lf.formatEvent(p)
+	if err != nil {
+		return 0, err
+	}
+	_, err = lf.writer.Write(b)
+	return n, err
+}
+
+func (lf *logFormatter) WriteLevel(l zerolog.Level, p []byte) (int, error) {
+	b, n, err := lf.formatEvent(p)
+	if err != nil {
+		return 0, err
+	}
+	if lw, ok := lf.writer.(zerolog.LevelWriter); ok {
+		_, err = lw.WriteLevel(l, b)
+	} else {
+		_, err = lf.writer.Write(b)
+	}
+	return n, err
 }
 
 func SetStderrLevel(level string) error {

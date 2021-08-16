@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/Mike-Joseph/sedire/lib/config"
 	"github.com/Mike-Joseph/sedire/lib/logging"
@@ -38,9 +39,10 @@ const (
 )
 
 var (
-	cfgFile string
-	addSSDP bool
-	addMDNS bool
+	cfgFile   string
+	cfgGlobal *config.Config
+	addSSDP   bool
+	addMDNS   bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -78,16 +80,15 @@ func init() {
 
 func initLogging(warn bool) {
 	var err error
-	c := config.New(nil, overridePrefix, globalPrefix, defaultPrefix)
-	err = logging.Main.Stderr.SetLevel(c.GetString("stderr_level"))
+	err = logging.Main.Stderr.SetLevel(cfgGlobal.GetString("stderr_level"))
 	if warn && err != nil {
 		defer logging.Main.Warn().Err(err).Msg("Unable to set STDERR logging level")
 	}
-	err = logging.Main.Stdout.SetLevel(c.GetString("stdout_level"))
+	err = logging.Main.Stdout.SetLevel(cfgGlobal.GetString("stdout_level"))
 	if warn && err != nil {
 		defer logging.Main.Warn().Err(err).Msg("Unable to set STDOUT logging level")
 	}
-	err = logging.Main.Syslog.SetLevel(c.GetString("syslog_level"))
+	err = logging.Main.Syslog.SetLevel(cfgGlobal.GetString("syslog_level"))
 	if warn && err != nil {
 		defer logging.Main.Warn().Err(err).Msg("Unable to set syslog logging level")
 	}
@@ -136,6 +137,7 @@ func initConfig() {
 		defer logging.Main.Info().Msgf("Using config file: %s", viper.ConfigFileUsed())
 	}
 
+	cfgGlobal = config.New(nil, overridePrefix, globalPrefix, defaultPrefix)
 	initLogging(false)
 }
 
@@ -207,11 +209,17 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		relays[k].Initialize()
 	}
 
-	if viper.GetBool("run_if_empty") || len(relays) > 0 {
-		for _, v := range relays {
-			go v.Listen()
+	if len(relays) > 0 {
+		var wg sync.WaitGroup
+		wg.Add(len(relays))
+		for _, r := range relays {
+			go func(r *relay.Relay) { r.Listen(); wg.Done() }(r)
 		}
+		wg.Wait()
+	} else if cfgGlobal.GetBool("run_if_empty") {
+		logging.Main.Warn().Msg("No relays configured; running anyway")
 		select {}
+	} else {
+		logging.Main.Fatal().Msg("No relays configured; aborting")
 	}
-	logging.Main.Fatal().Msg("Nothing to do")
 }

@@ -28,7 +28,10 @@ import (
 )
 
 const (
-	globalPrefix       = ""
+	defaultPrefix  = "default"
+	globalPrefix   = "global"
+	overridePrefix = ""
+
 	stderrDefaultLevel = "info"
 	stdoutDefaultLevel = "disabled"
 	syslogDefaultLevel = "disabled"
@@ -69,13 +72,13 @@ func init() {
 	pf.BoolVarP(&addMDNS, "enable-mdns", "M", false, "enable automatic handling for mDNS packets")
 	pf.BoolVarP(&addSSDP, "enable-ssdp", "S", false, "enable automatic handling for SSDP packets")
 	pf.StringArrayP("interface", "i", nil, "interface to use as both send and receive")
-	viper.BindPFlag("send_interfaces", pf.Lookup("interface"))
-	viper.BindPFlag("receive_interfaces", pf.Lookup("interface"))
+	viper.BindPFlag(defaultPrefix+".send_interfaces", pf.Lookup("interface"))
+	viper.BindPFlag(defaultPrefix+".receive_interfaces", pf.Lookup("interface"))
 }
 
 func initLogging(warn bool) {
 	var err error
-	c := config.Config{Override: viper.Sub(globalPrefix)}
+	c := config.New(nil, overridePrefix, globalPrefix, defaultPrefix)
 	err = logging.Main.Stderr.SetLevel(c.GetString("stderr_level"))
 	if warn && err != nil {
 		defer logging.Main.Warn().Err(err).Msg("Unable to set STDERR logging level")
@@ -94,22 +97,23 @@ func initLogging(warn bool) {
 func initConfig() {
 	pf := rootCmd.PersistentFlags()
 
-	viper.SetDefault("stderr_level", stderrDefaultLevel)
-	viper.SetDefault("stdout_level", stdoutDefaultLevel)
-	viper.SetDefault("syslog_level", syslogDefaultLevel)
+	viper.SetDefault(defaultPrefix+".stderr_level", stderrDefaultLevel)
+	viper.SetDefault(defaultPrefix+".stdout_level", stdoutDefaultLevel)
+	viper.SetDefault(defaultPrefix+".syslog_level", syslogDefaultLevel)
 	if flag := pf.Lookup("stderr-level"); flag.Changed {
-		viper.SetDefault(globalPrefix+".stderr_level", flag.Value.String())
+		viper.SetDefault(overridePrefix+".stderr_level", flag.Value.String())
 	}
 	if flag := pf.Lookup("stdout-level"); flag.Changed {
-		viper.SetDefault(globalPrefix+".stdout_level", flag.Value.String())
+		viper.SetDefault(overridePrefix+".stdout_level", flag.Value.String())
 	}
 	if flag := pf.Lookup("syslog-level"); flag.Changed {
-		viper.SetDefault(globalPrefix+".syslog_level", flag.Value.String())
+		viper.SetDefault(overridePrefix+".syslog_level", flag.Value.String())
 	}
 
-	viper.SetDefault("proxy_requests", true)
-	viper.SetDefault("proxy_replies", true)
-	viper.SetDefault("response_timeout", "10s")
+	viper.SetDefault(defaultPrefix+".enabled", true)
+	viper.SetDefault(defaultPrefix+".proxy_requests", true)
+	viper.SetDefault(defaultPrefix+".proxy_replies", true)
+	viper.SetDefault(defaultPrefix+".response_timeout", "10s")
 
 	if addMDNS {
 		viper.SetDefault("mdns.group", "224.0.0.251:5353")
@@ -127,9 +131,6 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 	}
 
-	viper.SetEnvPrefix("sedire")
-	viper.AutomaticEnv() // read in environment variables that match
-
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		defer logging.Main.Info().Msgf("Using config file: %s", viper.ConfigFileUsed())
@@ -144,7 +145,12 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		if len(parts) != 2 {
 			logging.Main.Fatal().Msgf("Unable to parse argument: %s", arg)
 		}
-		viper.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		k := strings.TrimSpace(parts[0])
+		v := strings.TrimSpace(parts[1])
+		if !strings.ContainsRune(k, '.') {
+			k = overridePrefix + "." + k
+		}
+		viper.Set(k, v)
 	}
 
 	// Repeat initialization of logging in case the commandline parsing
@@ -152,25 +158,22 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 	initLogging(true)
 
 	relays := make(map[string]*relay.Relay)
-	override := viper.Sub(globalPrefix)
-	for _, k := range viper.AllKeys() {
-		parts := strings.Split(k, ".")
-		if len(parts) <= 1 {
+	for k := range viper.AllSettings() {
+		if k == defaultPrefix || k == globalPrefix || k == overridePrefix {
 			continue
 		}
-		name := parts[0]
-		if name == globalPrefix {
+		if _, exists := relays[k]; exists {
 			continue
 		}
-		sub := viper.Sub(name)
-		if sub == nil {
+		logging.Main.Trace().Str("relay", k).Msg("Processing config for relay")
+		c := config.New(nil, overridePrefix, k, defaultPrefix)
+		if !c.GetBool("enabled") {
 			continue
 		}
-		c := config.Config{Child: sub, Override: override}
 		g := c.GetUDP4Addr("group")
 		li, err := logging.NewInstance()
 		ctx := li.With()
-		ctx = ctx.Str("relay", name)
+		ctx = ctx.Str("relay", k)
 		ctx = ctx.Str("group", g.String())
 		logger := logging.CtxLogger(ctx)
 		if err != nil {
@@ -185,7 +188,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		if err := li.Syslog.SetLevel(c.GetString("syslog_level")); err != nil {
 			defer logger.Warn().Err(err).Msg("Unable to set syslog logging level for relay")
 		}
-		relays[name] = &relay.Relay{
+		relays[k] = &relay.Relay{
 			Group:               g,
 			IfiRecvList:         c.GetIfiList("receive_interfaces"),
 			IfiSendList:         c.GetIfiList("send_interfaces"),
@@ -199,9 +202,9 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 			Logger:              logger,
 		}
 		if !c.GetBool("skip_invalid") {
-			relays[name].Validate(true)
+			relays[k].Validate(true)
 		}
-		relays[name].Initialize()
+		relays[k].Initialize()
 	}
 
 	if viper.GetBool("run_if_empty") || len(relays) > 0 {

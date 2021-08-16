@@ -20,6 +20,7 @@ import (
 	"os"
 
 	"github.com/fatih/color"
+	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
 )
 
@@ -33,8 +34,12 @@ func consoleMessageFormatter(msg interface{}) string {
 func newStderrWriter() (wf *writerFilter, err error) {
 	cw := zerolog.NewConsoleWriter()
 	cw.Out = os.Stderr
+	if isatty.IsTerminal(os.Stderr.Fd()) {
+		cw.FormatMessage = consoleMessageFormatter
+	} else {
+		cw.NoColor = true
+	}
 	cw.TimeFormat = timeFormat
-	cw.FormatMessage = consoleMessageFormatter
 	wf = newWriterFilter(cw)
 	return
 }

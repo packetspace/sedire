@@ -34,8 +34,8 @@ type Logger struct {
 
 type Instance struct {
 	Logger
-	Stdout      *writerFilter
 	Stderr      *writerFilter
+	Stdout      *writerFilter
 	Syslog      *writerFilter
 	multiWriter zerolog.LevelWriter
 }
@@ -68,12 +68,15 @@ func CtxLogger(ctx zerolog.Context) Logger {
 
 func NewInstance() (i Instance, err error) {
 	if err == nil {
-		i.Stderr, err = newConsoleWriter()
+		i.Stderr, err = newStderrWriter()
+	}
+	if err == nil {
+		i.Stdout, err = newStdoutWriter()
 	}
 	if err == nil {
 		i.Syslog, err = newSyslogWriter()
 	}
-	i.multiWriter = zerolog.MultiLevelWriter(i.Stderr, i.Syslog)
+	i.multiWriter = zerolog.MultiLevelWriter(i.Stderr, i.Stdout, i.Syslog)
 	i.Logger = BaseLogger(i.multiWriter)
 	return
 }

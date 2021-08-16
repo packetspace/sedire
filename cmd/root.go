@@ -30,6 +30,7 @@ import (
 const (
 	globalPrefix       = ""
 	stderrDefaultLevel = "info"
+	stdoutDefaultLevel = "disabled"
 	syslogDefaultLevel = "disabled"
 )
 
@@ -62,8 +63,9 @@ func init() {
 	// will be global for your application.
 	pf := rootCmd.PersistentFlags()
 	pf.StringVarP(&cfgFile, "config-file", "c", "", "config file")
-	pf.StringP("stderr-level", "s", stderrDefaultLevel, "stderr logging level")
-	pf.StringP("syslog-level", "l", syslogDefaultLevel, "syslog logging level")
+	pf.StringP("stderr-level", "e", stderrDefaultLevel, "STDERR message logging level")
+	pf.StringP("stdout-level", "o", stdoutDefaultLevel, "STDOUT event logging level")
+	pf.StringP("syslog-level", "l", syslogDefaultLevel, "syslog message logging level")
 	pf.BoolVarP(&addMDNS, "enable-mdns", "M", false, "enable automatic handling for mDNS packets")
 	pf.BoolVarP(&addSSDP, "enable-ssdp", "S", false, "enable automatic handling for SSDP packets")
 	pf.StringArrayP("interface", "i", nil, "interface to use as both send and receive")
@@ -78,6 +80,10 @@ func initLogging(warn bool) {
 	if warn && err != nil {
 		defer logging.Main.Warn().Err(err).Msg("Unable to set STDERR logging level")
 	}
+	err = logging.Main.Stdout.SetLevel(c.GetString("stdout_level"))
+	if warn && err != nil {
+		defer logging.Main.Warn().Err(err).Msg("Unable to set STDOUT logging level")
+	}
 	err = logging.Main.Syslog.SetLevel(c.GetString("syslog_level"))
 	if warn && err != nil {
 		defer logging.Main.Warn().Err(err).Msg("Unable to set syslog logging level")
@@ -89,9 +95,13 @@ func initConfig() {
 	pf := rootCmd.PersistentFlags()
 
 	viper.SetDefault("stderr_level", stderrDefaultLevel)
+	viper.SetDefault("stdout_level", stdoutDefaultLevel)
 	viper.SetDefault("syslog_level", syslogDefaultLevel)
 	if flag := pf.Lookup("stderr-level"); flag.Changed {
 		viper.SetDefault(globalPrefix+".stderr_level", flag.Value.String())
+	}
+	if flag := pf.Lookup("stdout-level"); flag.Changed {
+		viper.SetDefault(globalPrefix+".stdout_level", flag.Value.String())
 	}
 	if flag := pf.Lookup("syslog-level"); flag.Changed {
 		viper.SetDefault(globalPrefix+".syslog_level", flag.Value.String())
@@ -164,10 +174,13 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		ctx = ctx.Str("group", g.String())
 		logger := logging.CtxLogger(ctx)
 		if err != nil {
-			logger.Err(err).Msg("Failed to cre for relay")
+			logger.Err(err).Msg("Failed to create logging instance for relay")
 		}
 		if err := li.Stderr.SetLevel(c.GetString("stderr_level")); err != nil {
 			defer logger.Warn().Err(err).Msg("Unable to set STDERR logging level for relay")
+		}
+		if err := li.Stdout.SetLevel(c.GetString("stdout_level")); err != nil {
+			defer logger.Warn().Err(err).Msg("Unable to set STDOUT logging level for relay")
 		}
 		if err := li.Syslog.SetLevel(c.GetString("syslog_level")); err != nil {
 			defer logger.Warn().Err(err).Msg("Unable to set syslog logging level for relay")

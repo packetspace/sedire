@@ -18,23 +18,9 @@ package logging
 
 import (
 	"os"
-
-	"github.com/fatih/color"
-	"github.com/rs/zerolog"
 )
 
-func consoleMessageFormatter(msg interface{}) string {
-	if msg == nil {
-		return ""
-	}
-	return color.New(color.BgBlue).Sprint(msg)
-}
-
-func newConsoleWriter() (wf *writerFilter, err error) {
-	cw := zerolog.NewConsoleWriter()
-	cw.Out = os.Stderr
-	cw.TimeFormat = timeFormat
-	cw.FormatMessage = consoleMessageFormatter
-	wf = newWriterFilter(cw)
+func newStdoutWriter() (wf *writerFilter, err error) {
+	wf = newWriterFilter(os.Stdout)
 	return
 }

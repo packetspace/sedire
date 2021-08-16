@@ -78,19 +78,19 @@ func init() {
 	viper.BindPFlag(defaultPrefix+".receive_interfaces", pf.Lookup("interface"))
 }
 
-func initLogging(warn bool) {
+func initLogging(logger *logging.Instance, cfg *config.Config, warn bool) {
 	var err error
-	err = logging.Main.Stderr.SetLevel(cfgGlobal.GetString("stderr_level"))
+	err = logger.Stderr.SetLevel(cfg.GetString("stderr_level"))
 	if warn && err != nil {
-		defer logging.Main.Warn().Err(err).Msg("Unable to set STDERR logging level")
+		defer logger.Warn().Err(err).Msg("Unable to set STDERR logging level")
 	}
-	err = logging.Main.Stdout.SetLevel(cfgGlobal.GetString("stdout_level"))
+	err = logger.Stdout.SetLevel(cfg.GetString("stdout_level"))
 	if warn && err != nil {
-		defer logging.Main.Warn().Err(err).Msg("Unable to set STDOUT logging level")
+		defer logger.Warn().Err(err).Msg("Unable to set STDOUT logging level")
 	}
-	err = logging.Main.Syslog.SetLevel(cfgGlobal.GetString("syslog_level"))
+	err = logger.Syslog.SetLevel(cfg.GetString("syslog_level"))
 	if warn && err != nil {
-		defer logging.Main.Warn().Err(err).Msg("Unable to set syslog logging level")
+		defer logger.Warn().Err(err).Msg("Unable to set syslog logging level")
 	}
 }
 
@@ -138,7 +138,7 @@ func initConfig() {
 	}
 
 	cfgGlobal = config.New(nil, overridePrefix, globalPrefix, defaultPrefix)
-	initLogging(false)
+	initLogging(&logging.Main, cfgGlobal, false)
 }
 
 func rootCmdRun(cmd *cobra.Command, args []string) {
@@ -157,7 +157,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 
 	// Repeat initialization of logging in case the commandline parsing
 	// changed the logging levels.
-	initLogging(true)
+	initLogging(&logging.Main, cfgGlobal, true)
 
 	relays := make(map[string]*relay.Relay)
 	for k := range viper.AllSettings() {
@@ -181,15 +181,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		if err != nil {
 			logger.Err(err).Msg("Failed to create logging instance for relay")
 		}
-		if err := li.Stderr.SetLevel(c.GetString("stderr_level")); err != nil {
-			defer logger.Warn().Err(err).Msg("Unable to set STDERR logging level for relay")
-		}
-		if err := li.Stdout.SetLevel(c.GetString("stdout_level")); err != nil {
-			defer logger.Warn().Err(err).Msg("Unable to set STDOUT logging level for relay")
-		}
-		if err := li.Syslog.SetLevel(c.GetString("syslog_level")); err != nil {
-			defer logger.Warn().Err(err).Msg("Unable to set syslog logging level for relay")
-		}
+		initLogging(&li, c, true)
 		relays[k] = &relay.Relay{
 			Group:               g,
 			IfiRecvList:         c.GetIfiList("receive_interfaces"),

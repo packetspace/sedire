@@ -30,7 +30,6 @@ const (
 
 type logFormatter struct {
 	writer io.Writer
-	cw     zerolog.ConsoleWriter
 }
 
 func logMessageFormatter(msg interface{}) string {
@@ -41,20 +40,17 @@ func logMessageFormatter(msg interface{}) string {
 }
 
 func newLogFormatter(w io.Writer) *logFormatter {
-	var lf logFormatter
-	lf.writer = w
-	lf.cw = zerolog.NewConsoleWriter()
-	lf.cw.Out = nil
-	lf.cw.NoColor = true
-	lf.cw.PartsOrder = []string{zerolog.MessageFieldName}
-	lf.cw.FormatMessage = logMessageFormatter
-	return &lf
+	return &logFormatter{writer: w}
 }
 
 func (lf *logFormatter) formatEvent(p []byte) (b []byte, n int, err error) {
 	var cwBuf, lfBuf bytes.Buffer
-	lf.cw.Out = &cwBuf
-	n, err = lf.cw.Write(p)
+	cw := zerolog.NewConsoleWriter()
+	cw.Out = &cwBuf
+	cw.NoColor = true
+	cw.PartsOrder = []string{zerolog.MessageFieldName}
+	cw.FormatMessage = logMessageFormatter
+	n, err = cw.Write(p)
 	parts := bytes.SplitN(cwBuf.Bytes(), []byte(fmtMarker), 2)
 	lfBuf.Write(bytes.TrimSpace(parts[0]))
 	if len(parts) == 2 {
@@ -64,7 +60,6 @@ func (lf *logFormatter) formatEvent(p []byte) (b []byte, n int, err error) {
 		lfBuf.WriteRune(')')
 	}
 	b = lfBuf.Bytes()
-	lf.cw.Out = nil
 	return
 }
 

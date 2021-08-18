@@ -17,8 +17,11 @@ limitations under the License.
 package cmd
 
 import (
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/Mike-Joseph/sedire/lib/config"
 	"github.com/Mike-Joseph/sedire/lib/logging"
@@ -43,6 +46,7 @@ var (
 	cfgGlobal *config.Config
 	addSSDP   bool
 	addMDNS   bool
+	relays    = make(map[string]*relay.Relay)
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -76,6 +80,8 @@ func init() {
 	pf.StringArrayP("interface", "i", nil, "interface to use as both send and receive")
 	viper.BindPFlag(defaultPrefix+".send_interfaces", pf.Lookup("interface"))
 	viper.BindPFlag(defaultPrefix+".receive_interfaces", pf.Lookup("interface"))
+	pf.DurationP("stats-interval", "s", 0, "statistics logging interval")
+	viper.BindPFlag(overridePrefix+".stats_interval", pf.Lookup("stats-interval"))
 }
 
 func initLogging(logger *logging.Instance, cfg *config.Config, warn bool) {
@@ -141,6 +147,26 @@ func initConfig() {
 	initLogging(&logging.Main, cfgGlobal, false)
 }
 
+func handleSignals(c <-chan os.Signal) {
+	for s := range c {
+		logging.Main.Trace().Stringer("signal", s).Msg("Received signal")
+		switch s {
+		case syscall.SIGHUP:
+			logging.Main.Warn().Msg("SIGHUP not currently supported")
+		case syscall.SIGTERM, syscall.SIGINT:
+			logging.Main.Info().Msg("Terminating by request")
+			for _, r := range relays {
+				r.LogStats()
+				r.Stop()
+			}
+		case syscall.SIGINFO:
+			for _, r := range relays {
+				r.LogStats()
+			}
+		}
+	}
+}
+
 func rootCmdRun(cmd *cobra.Command, args []string) {
 	for _, arg := range args {
 		parts := strings.SplitN(arg, "=", 2)
@@ -159,7 +185,11 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 	// changed the logging levels.
 	initLogging(&logging.Main, cfgGlobal, true)
 
-	relays := make(map[string]*relay.Relay)
+	signalHandler := make(chan os.Signal, 1)
+	defer func() { signal.Stop(signalHandler); close(signalHandler) }()
+	go handleSignals(signalHandler)
+
+	var wg sync.WaitGroup
 	for k := range viper.AllSettings() {
 		if k == defaultPrefix || k == globalPrefix || k == overridePrefix {
 			continue
@@ -193,7 +223,9 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 			RequestSrcPortReuse: c.GetBool("reuse_source_port_requests"),
 			ReplySrcPortReuse:   c.GetBool("reuse_source_port_replies"),
 			ResponseTimeout:     c.GetDuration("response_timeout"),
+			StatsInterval:       c.GetDuration("stats_interval"),
 			Logger:              logger,
+			TerminationFunction: wg.Done,
 		}
 		if !c.GetBool("skip_invalid") {
 			relays[k].Validate(true)
@@ -202,10 +234,10 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 	}
 
 	if len(relays) > 0 {
-		var wg sync.WaitGroup
+		signal.Notify(signalHandler, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT, syscall.SIGINFO)
 		wg.Add(len(relays))
 		for _, r := range relays {
-			go func(r *relay.Relay) { r.Listen(); wg.Done() }(r)
+			r.Start()
 		}
 		wg.Wait()
 	} else if cfgGlobal.GetBool("run_if_empty") {

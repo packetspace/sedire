@@ -280,7 +280,7 @@ func (r *Relay) Run() {
 			for {
 				select {
 				case <-t.C:
-					r.LogStats()
+					r.LogStats("interval")
 				case <-ch:
 					break loop
 				}

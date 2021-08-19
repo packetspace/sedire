@@ -49,7 +49,7 @@ func (r *Relay) GetStats() (rs RelayStats) {
 	return
 }
 
-func (r *Relay) LogStats() {
+func (r *Relay) LogStats(reason string) {
 	rs := r.GetStats()
 	e := r.Logger.Info()
 	rst := reflect.TypeOf(rs)
@@ -63,5 +63,5 @@ func (r *Relay) LogStats() {
 		v := rsv.Field(i).Interface()
 		e.Interface(k, v)
 	}
-	e.Msg("Relay statistics")
+	e.Str("reason", reason).Msg("Relay statistics")
 }

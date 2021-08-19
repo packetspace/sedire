@@ -156,12 +156,12 @@ func handleSignals(c <-chan os.Signal) {
 		case syscall.SIGTERM, syscall.SIGINT:
 			logging.Main.Info().Msg("Terminating by request")
 			for _, r := range relays {
-				r.LogStats()
+				r.LogStats("termination")
 				r.Stop()
 			}
 		case syscall.SIGWINCH:
 			for _, r := range relays {
-				r.LogStats()
+				r.LogStats("signal")
 			}
 		}
 	}

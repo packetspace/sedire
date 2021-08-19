@@ -54,10 +54,13 @@ func (lf *logFormatter) formatEvent(p []byte) (b []byte, n int, err error) {
 	parts := bytes.SplitN(cwBuf.Bytes(), []byte(fmtMarker), 2)
 	lfBuf.Write(bytes.TrimSpace(parts[0]))
 	if len(parts) == 2 {
-		lfBuf.WriteRune(' ')
-		lfBuf.WriteRune('(')
-		lfBuf.Write(bytes.TrimSpace(parts[1]))
-		lfBuf.WriteRune(')')
+		fields := bytes.TrimSpace(parts[1])
+		if len(fields) > 0 {
+			lfBuf.WriteRune(' ')
+			lfBuf.WriteRune('(')
+			lfBuf.Write(fields)
+			lfBuf.WriteRune(')')
+		}
 	}
 	b = lfBuf.Bytes()
 	return

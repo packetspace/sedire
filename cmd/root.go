@@ -159,7 +159,7 @@ func handleSignals(c <-chan os.Signal) {
 				r.LogStats()
 				r.Stop()
 			}
-		case syscall.SIGINFO:
+		case syscall.SIGWINCH:
 			for _, r := range relays {
 				r.LogStats()
 			}
@@ -234,7 +234,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 	}
 
 	if len(relays) > 0 {
-		signal.Notify(signalHandler, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT, syscall.SIGINFO)
+		signal.Notify(signalHandler, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT, syscall.SIGWINCH)
 		wg.Add(len(relays))
 		for _, r := range relays {
 			r.Start()

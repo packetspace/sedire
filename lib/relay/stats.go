@@ -39,16 +39,13 @@ type RelayStats struct {
 }
 
 func (r *Relay) GetStats() (rs RelayStats) {
-	rs.ForwardedRequests = atomic.LoadUint64(&r.stats.ForwardedRequests)
-	rs.ForwardedReplies = atomic.LoadUint64(&r.stats.ForwardedReplies)
-	rs.ProxiedRequests = atomic.LoadUint64(&r.stats.ProxiedRequests)
-	rs.ProxiedReplies = atomic.LoadUint64(&r.stats.ProxiedReplies)
-	rs.SrcPortReusedRequests = atomic.LoadUint64(&r.stats.SrcPortReusedRequests)
-	rs.SrcPortReusedReplies = atomic.LoadUint64(&r.stats.SrcPortReusedReplies)
-	rs.PacketsReceived = atomic.LoadUint64(&r.stats.PacketsReceived)
-	rs.PacketsSent = atomic.LoadUint64(&r.stats.PacketsSent)
-	rs.BytesReceived = atomic.LoadUint64(&r.stats.BytesReceived)
-	rs.BytesSent = atomic.LoadUint64(&r.stats.BytesSent)
+	from := reflect.ValueOf(&r.stats).Elem()
+	to := reflect.ValueOf(&rs).Elem()
+	for i := 0; i < to.NumField(); i++ {
+		ptr := from.Field(i).Addr().Interface().(*uint64)
+		val := atomic.LoadUint64(ptr)
+		to.Field(i).SetUint(val)
+	}
 	return
 }
 

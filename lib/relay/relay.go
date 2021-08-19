@@ -120,6 +120,7 @@ func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logge
 			atomic.AddUint64(&r.stats.PacketsSent, 1)
 			atomic.AddUint64(&r.stats.BytesReceived, uint64(len(p.Msg)))
 			atomic.AddUint64(&r.stats.BytesSent, uint64(len(p.Msg)))
+			atomic.AddUint64(&r.stats.TotalReplies, 1)
 			p.Ifi = nil
 			p.Dst = req.Src
 			pc := proxyConn
@@ -188,10 +189,19 @@ func (r *Relay) listenMulticast() {
 		ctx = ctx.Str("request_dst", p.Dst.String())
 		ctx = ctx.Int("request_packet_size", len(p.Msg))
 		l := logging.CtxLogger(ctx)
-		if (p.Dst.IP.Equal(r.Group.IP) || (r.AcceptUnicast && p.Dst.IP.IsGlobalUnicast())) && recvIfIndices.Contains(p.Ifi.Index) {
+		mcast := p.Dst.IP.Equal(r.Group.IP)
+		ucast := r.AcceptUnicast && p.Dst.IP.IsGlobalUnicast()
+		if (mcast || ucast) && recvIfIndices.Contains(p.Ifi.Index) {
 			l.Trace().Msg("Processing packet destined to this relay")
 			atomic.AddUint64(&r.stats.PacketsReceived, 1)
 			atomic.AddUint64(&r.stats.BytesReceived, uint64(len(p.Msg)))
+			atomic.AddUint64(&r.stats.TotalRequests, 1)
+			if mcast {
+				atomic.AddUint64(&r.stats.MulticastRequests, 1)
+			}
+			if ucast {
+				atomic.AddUint64(&r.stats.UnicastRequests, 1)
+			}
 			reflect := reflectIfIndices.Contains(p.Ifi.Index)
 			if !r.ProxyRequests {
 				atomic.AddUint64(&r.stats.ForwardedRequests, 1)

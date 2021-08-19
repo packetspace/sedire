@@ -22,12 +22,16 @@ import (
 )
 
 type RelayStats struct {
+	TotalRequests         uint64 `json:"total_requests"`
+	TotalReplies          uint64 `json:"total_replies"`
 	ForwardedRequests     uint64 `json:"forwarded_requests"`
 	ForwardedReplies      uint64 `json:"forwarded_replies"`
 	ProxiedRequests       uint64 `json:"proxied_requests"`
 	ProxiedReplies        uint64 `json:"proxied_replies"`
 	SrcPortReusedRequests uint64 `json:"src_port_reused_requests"`
 	SrcPortReusedReplies  uint64 `json:"src_port_reused_replies"`
+	UnicastRequests       uint64 `json:"unicast_requests"`
+	MulticastRequests     uint64 `json:"multicast_requests"`
 	PacketsReceived       uint64 `json:"packets_received"`
 	PacketsSent           uint64 `json:"packets_sent"`
 	BytesReceived         uint64 `json:"bytes_received"`

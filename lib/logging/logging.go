@@ -80,3 +80,17 @@ func NewInstance() (i Instance, err error) {
 	i.Logger = BaseLogger(i.multiWriter)
 	return
 }
+
+func (i *Instance) OptimizeLevel() {
+	level := zerolog.Disabled
+	for _, wf := range []*writerFilter{i.Stderr, i.Stdout, i.Syslog} {
+		if wf != nil {
+			newLevel := wf.GetLevel()
+			if newLevel < level {
+				level = newLevel
+			}
+		}
+	}
+	i.Logger = Logger{i.Level(level)}
+	return
+}

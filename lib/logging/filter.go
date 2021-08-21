@@ -36,14 +36,14 @@ func newWriterFilter(w io.Writer) *writerFilter {
 }
 
 func (wf *writerFilter) Write(p []byte) (int, error) {
-	if wf == nil || atomic.LoadInt32(&wf.level) >= int32(zerolog.Disabled) {
+	if wf == nil || wf.GetLevel() >= zerolog.Disabled {
 		return len(p), nil
 	}
 	return wf.writer.Write(p)
 }
 
 func (wf *writerFilter) WriteLevel(l zerolog.Level, p []byte) (int, error) {
-	if wf == nil || int32(l) < atomic.LoadInt32(&wf.level) {
+	if wf == nil || l < wf.GetLevel() {
 		return len(p), nil
 	}
 	if lw, ok := wf.writer.(zerolog.LevelWriter); ok {
@@ -58,4 +58,8 @@ func (wf *writerFilter) SetLevel(level string) error {
 		atomic.StoreInt32(&wf.level, int32(l))
 	}
 	return err
+}
+
+func (wf *writerFilter) GetLevel() zerolog.Level {
+	return zerolog.Level(atomic.LoadInt32(&wf.level))
 }

@@ -98,6 +98,7 @@ func initLogging(logger *logging.Instance, cfg *config.Config, warn bool) {
 	if warn && err != nil {
 		defer logger.Warn().Err(err).Msg("Unable to set syslog logging level")
 	}
+	logger.OptimizeLevel()
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -204,14 +205,14 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		}
 		g := c.GetUDP4Addr("group")
 		li, err := logging.NewInstance()
+		initLogging(&li, c, true)
 		ctx := li.With()
 		ctx = ctx.Str("relay", k)
-		ctx = ctx.Str("group", g.String())
+		ctx = ctx.Stringer("group", g)
 		logger := logging.CtxLogger(ctx)
 		if err != nil {
 			logger.Err(err).Msg("Failed to create logging instance for relay")
 		}
-		initLogging(&li, c, true)
 		relays[k] = &relay.Relay{
 			Group:               g,
 			IfiRecvList:         c.GetIfiList("receive_interfaces"),

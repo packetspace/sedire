@@ -19,6 +19,7 @@ package relay
 import (
 	"fmt"
 	"net"
+	"sync"
 	"syscall"
 
 	"github.com/Mike-Joseph/sedire/lib/logging"
@@ -39,13 +40,10 @@ type packetConn struct {
 	*ipv4.PacketConn
 }
 
-type rawSend struct {
-	p *packet
-	l logging.Logger
-	s string
+var rawConn struct {
+	rc *ipv4.RawConn
+	mu sync.Mutex
 }
-
-var rawSender chan *rawSend
 
 func listenUDP4(addr *net.UDPAddr) (pc packetConn, err error) {
 	conn, err := net.ListenUDP("udp4", addr)
@@ -148,83 +146,83 @@ func (p *packet) sendRaw(logger logging.Logger, success string) {
 	if p.Msg == nil {
 		logger.Panic().Msg("relay.writeTo() called without p.Msg")
 	}
-	rawSender <- &rawSend{p: p, l: logger, s: success}
+	var cm *ipv4.ControlMessage
+	ctx := logger.With()
+	if p.Ifi != nil {
+		ctx = ctx.Str("xmit_interface", p.Ifi.Name)
+	}
+	ctx = ctx.Str("xmit_src", p.Src.String())
+	ctx = ctx.Str("xmit_dst", p.Dst.String())
+	l := logging.CtxLogger(ctx)
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+	udp := &layers.UDP{
+		SrcPort: layers.UDPPort(p.Src.Port),
+		DstPort: layers.UDPPort(p.Dst.Port),
+	}
+	ip := &layers.IPv4{
+		Version:  ipv4.Version,
+		TTL:      1,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    p.Src.IP,
+		DstIP:    p.Dst.IP,
+	}
+	if err := udp.SetNetworkLayerForChecksum(ip); err != nil {
+		l.Err(err).Msg("Failed to set UDP/IP layer in raw packet")
+		return
+	}
+	if err := gopacket.SerializeLayers(buf, opts, udp, gopacket.Payload(p.Msg)); err != nil {
+		l.Err(err).Msg("Failed to serialize raw packet payload")
+		return
+	}
+	payload := buf.Bytes()
+	h := &ipv4.Header{
+		Version:  int(ip.Version),
+		Len:      ipv4.HeaderLen,
+		TotalLen: ipv4.HeaderLen + len(payload),
+		TTL:      int(ip.TTL),
+		Protocol: int(ip.Protocol),
+		Src:      ip.SrcIP,
+		Dst:      ip.DstIP,
+	}
+	rawConn.mu.Lock()
+	defer rawConn.mu.Unlock()
+	if p.Ifi != nil {
+		if p.Dst.IP.IsMulticast() {
+			if err := rawConn.rc.SetMulticastInterface(p.Ifi); err != nil {
+				logger.Err(err).Msg("Failed to set multicast interface")
+				return
+			}
+		} else {
+			if cm == nil {
+				cm = &ipv4.ControlMessage{}
+			}
+			cm.IfIndex = p.Ifi.Index
+		}
+	}
+	if err := rawConn.rc.WriteTo(h, payload, cm); err != nil {
+		l.Err(err).Msg("Failed to send raw packet")
+		return
+	}
+	l.Debug().Msg(success)
 }
 
 func StartRaw() {
-	if rawSender == nil {
+	rawConn.mu.Lock()
+	defer rawConn.mu.Unlock()
+	if rawConn.rc == nil {
 		protocol := fmt.Sprintf("ip4:%d", syscall.IPPROTO_RAW)
 		conn, err := net.ListenIP(protocol, &net.IPAddr{})
 		if err != nil {
 			logging.Main.Fatal().Err(err).Msg("Failed to bind raw socket")
 		}
-		rc, err := ipv4.NewRawConn(conn)
+		rawConn.rc, err = ipv4.NewRawConn(conn)
 		if err != nil {
 			logging.Main.Fatal().Err(err).Msg("Failed to create raw connection")
 		}
-		rawSender = make(chan *rawSend)
-		go rawSenderLoop(rc)
-	}
-}
-
-func rawSenderLoop(rc *ipv4.RawConn) {
-	for rs := range rawSender {
-		var cm *ipv4.ControlMessage
-		ctx := rs.l.With()
-		if rs.p.Ifi != nil {
-			if rs.p.Dst.IP.IsMulticast() {
-				if err := rc.SetMulticastInterface(rs.p.Ifi); err != nil {
-					rs.l.Err(err).Msg("Failed to set multicast interface")
-					continue
-				}
-			} else {
-				if cm == nil {
-					cm = &ipv4.ControlMessage{}
-				}
-				cm.IfIndex = rs.p.Ifi.Index
-			}
-			ctx = ctx.Str("xmit_interface", rs.p.Ifi.Name)
-		}
-		ctx = ctx.Str("xmit_src", rs.p.Src.String())
-		ctx = ctx.Str("xmit_dst", rs.p.Dst.String())
-		l := logging.CtxLogger(ctx)
-		buf := gopacket.NewSerializeBuffer()
-		opts := gopacket.SerializeOptions{
-			FixLengths:       true,
-			ComputeChecksums: true,
-		}
-		udp := &layers.UDP{
-			SrcPort: layers.UDPPort(rs.p.Src.Port),
-			DstPort: layers.UDPPort(rs.p.Dst.Port),
-		}
-		ip := &layers.IPv4{
-			Version:  ipv4.Version,
-			TTL:      1,
-			Protocol: layers.IPProtocolUDP,
-			SrcIP:    rs.p.Src.IP,
-			DstIP:    rs.p.Dst.IP,
-		}
-		if err := udp.SetNetworkLayerForChecksum(ip); err != nil {
-			l.Err(err).Msg("Failed to set UDP/IP layer in raw packet")
-		}
-		if err := gopacket.SerializeLayers(buf, opts, udp, gopacket.Payload(rs.p.Msg)); err != nil {
-			l.Err(err).Msg("Failed to serialize raw packet payload")
-			continue
-		}
-		payload := buf.Bytes()
-		h := &ipv4.Header{
-			Version:  int(ip.Version),
-			Len:      ipv4.HeaderLen,
-			TotalLen: ipv4.HeaderLen + len(payload),
-			TTL:      int(ip.TTL),
-			Protocol: int(ip.Protocol),
-			Src:      ip.SrcIP,
-			Dst:      ip.DstIP,
-		}
-		if err := rc.WriteTo(h, payload, nil); err != nil {
-			l.Err(err).Msg("Failed to send raw packet")
-			continue
-		}
-		l.Debug().Msg(rs.s)
+		logging.Main.Trace().Msg("Created raw socket for sending")
 	}
 }

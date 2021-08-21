@@ -93,20 +93,20 @@ func (p *packet) validateWrite(srcRequired bool, logger logging.Logger) {
 	if p == nil {
 		logger.Panic().Msg("Packet write method called with nil packet")
 	}
-	if !srcRequired {
+	if srcRequired {
+		if p.Src == nil {
+			logger.Panic().Msg("Packet write method called without p.Src")
+		} else {
+			if p.Src.IP == nil {
+				logger.Panic().Msg("Packet write method called without p.Src.IP")
+			}
+			if p.Src.Port <= 0 || p.Src.Port > 65535 {
+				logger.Panic().Msg("Packet write method called with invalid p.Src.Port")
+			}
+		}
+	} else if p.Src != nil && (p.Src.Port < 0 || p.Src.Port > 65535) {
 		// p.Src.Port == 0 is permitted here since a default will be used
-		if p.Src.Port < 0 || p.Src.Port > 65535 {
-			logger.Panic().Msg("Packet write method called with invalid p.Src.Port")
-		}
-	} else if p.Src == nil {
-		logger.Panic().Msg("Packet write method called without p.Src")
-	} else {
-		if p.Src.IP == nil {
-			logger.Panic().Msg("Packet write method called without p.Src.IP")
-		}
-		if p.Src.Port <= 0 || p.Src.Port > 65535 {
-			logger.Panic().Msg("Packet write method called with invalid p.Src.Port")
-		}
+		logger.Panic().Msg("Packet write method called with invalid p.Src.Port")
 	}
 	if p.Dst == nil {
 		logger.Panic().Msg("Packet write method called without p.Dst")

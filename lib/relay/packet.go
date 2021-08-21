@@ -74,7 +74,7 @@ func readFrom(pc packetConn) (p packet, err error) {
 	if err != nil {
 		return
 	}
-	ifi, err := net.InterfaceByIndex(cm.IfIndex)
+	ifi, err := interfaceByIndex(cm.IfIndex)
 	if err != nil {
 		return
 	}

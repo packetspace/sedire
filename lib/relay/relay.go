@@ -43,11 +43,11 @@ type Relay struct {
 	Logger              logging.Logger
 	TerminationFunction func()
 
-	mcastListener packetConn
+	mcastListener *packetConn
 	stats         RelayStats
 }
 
-func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices mapset.Set, logger logging.Logger) {
+func (r *Relay) relayRequest(pc *packetConn, p packet, reflect bool, ifIndices mapset.Set, logger logging.Logger) {
 	recvIfIndex := p.Ifi.Index
 	p.Dst = r.Group
 	if r.ProxyRequests {
@@ -59,7 +59,7 @@ func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices ma
 		if r.ProxyRequests {
 			p.writeTo(pc, logger, "Reflected proxied request packet back to received interface")
 		} else {
-			p.sendRaw(logger, "Reflected native request packet back to received interface")
+			p.writeRaw(logger, "Reflected native request packet back to received interface")
 		}
 		if ifIndices != nil {
 			ifIndices.Add(p.Ifi.Index)
@@ -72,7 +72,7 @@ func (r *Relay) relayRequest(pc packetConn, p packet, reflect bool, ifIndices ma
 			if r.ProxyRequests {
 				p.writeTo(pc, logger, "Relayed request packet")
 			} else {
-				p.sendRaw(logger, "Forwarded native request packet")
+				p.writeRaw(logger, "Forwarded native request packet")
 			}
 			if ifIndices != nil {
 				ifIndices.Add(ifi.Index)
@@ -126,16 +126,16 @@ func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logge
 			pc := proxyConn
 			if !r.ProxyReplies {
 				atomic.AddUint64(&r.stats.ForwardedReplies, 1)
-				p.sendRaw(l, "Forwarded native reply packet to client")
-				continue
-			} else if r.ReplySrcPortReuse && p.Src.Port == r.Group.Port {
-				atomic.AddUint64(&r.stats.SrcPortReusedReplies, 1)
-				pc = r.mcastListener
+				p.writeRaw(l, "Forwarded native reply packet to client")
 			} else {
+				atomic.AddUint64(&r.stats.ProxiedReplies, 1)
+				if r.ReplySrcPortReuse && p.Src.Port == r.Group.Port {
+					atomic.AddUint64(&r.stats.SrcPortReusedReplies, 1)
+					pc = r.mcastListener
+				}
 				p.Src = nil
+				p.writeTo(pc, l, "Relayed reply packet to client")
 			}
-			atomic.AddUint64(&r.stats.ProxiedReplies, 1)
-			p.writeTo(pc, l, "Relayed reply packet to client")
 		} else {
 			l.Trace().Msg("Discarding proxy reply packet received on unexpected interface")
 		}

@@ -38,19 +38,22 @@ type packet struct {
 
 type packetConn struct {
 	*ipv4.PacketConn
-}
-
-var rawConn struct {
-	rc *ipv4.RawConn
 	mu sync.Mutex
 }
 
-func listenUDP4(addr *net.UDPAddr) (pc packetConn, err error) {
+type rawConn struct {
+	*ipv4.RawConn
+	mu sync.Mutex
+}
+
+var mainRC = rawConn{}
+
+func listenUDP4(addr *net.UDPAddr) (pc *packetConn, err error) {
 	conn, err := net.ListenUDP("udp4", addr)
 	if err != nil {
 		return
 	}
-	pc = packetConn{ipv4.NewPacketConn(conn)}
+	pc = &packetConn{PacketConn: ipv4.NewPacketConn(conn)}
 	if err = pc.SetMulticastLoopback(false); err != nil {
 		pc.Close()
 		return
@@ -66,7 +69,7 @@ func listenUDP4(addr *net.UDPAddr) (pc packetConn, err error) {
 	return
 }
 
-func readFrom(pc packetConn) (p packet, err error) {
+func readFrom(pc *packetConn) (p packet, err error) {
 	buf := make([]byte, 65536)
 	n, cm, src, err := pc.ReadFrom(buf)
 	if err != nil {
@@ -86,25 +89,67 @@ func readFrom(pc packetConn) (p packet, err error) {
 	return
 }
 
-func (p *packet) writeTo(pc packetConn, logger logging.Logger, success string) {
-	var cm *ipv4.ControlMessage
-	ctx := logger.With()
-	if p.Src != nil && p.Src.IP != nil {
-		if cm == nil {
-			cm = &ipv4.ControlMessage{}
+func (p *packet) validateWrite(srcRequired bool, logger logging.Logger) {
+	if p == nil {
+		logger.Panic().Msg("Packet write method called with nil packet")
+	}
+	if !srcRequired {
+		// p.Src.Port == 0 is permitted here since a default will be used
+		if p.Src.Port < 0 || p.Src.Port > 65535 {
+			logger.Panic().Msg("Packet write method called with invalid p.Src.Port")
 		}
-		cm.Src = p.Src.IP
-		addr := *p.Src
-		addr.Port = pc.LocalAddr().(*net.UDPAddr).Port
-		ctx = ctx.Str("xmit_src", addr.String())
+	} else if p.Src == nil {
+		logger.Panic().Msg("Packet write method called without p.Src")
 	} else {
-		ctx = ctx.Str("xmit_src", pc.LocalAddr().String())
+		if p.Src.IP == nil {
+			logger.Panic().Msg("Packet write method called without p.Src.IP")
+		}
+		if p.Src.Port <= 0 || p.Src.Port > 65535 {
+			logger.Panic().Msg("Packet write method called with invalid p.Src.Port")
+		}
 	}
-	if p.Dst != nil && p.Dst.IP != nil {
-		ctx = ctx.Str("xmit_dst", p.Dst.String())
-	} else {
-		logger.Panic().Msg("relay.writeTo() called without p.Dst")
+	if p.Dst == nil {
+		logger.Panic().Msg("Packet write method called without p.Dst")
 	}
+	if p.Dst.IP == nil {
+		logger.Panic().Msg("Packet write method called without p.Dst.IP")
+	}
+	if p.Dst.Port <= 0 || p.Dst.Port > 65535 {
+		logger.Panic().Msg("Packet write method called with invalid p.Dst.Port")
+	}
+	if p.Dst.IP.IsMulticast() && p.Ifi == nil {
+		logger.Panic().Msg("Packet write method called with multicast destination and no interface")
+	}
+	if p.Msg == nil {
+		logger.Panic().Msg("Packet write method called without p.Msg")
+	}
+}
+
+func (p *packet) writeTo(pc *packetConn, logger logging.Logger, success string) {
+	p.validateWrite(false, logger)
+	var cm *ipv4.ControlMessage
+	addr := *pc.LocalAddr().(*net.UDPAddr)
+	if p.Src != nil {
+		if p.Src.IP != nil {
+			if cm == nil {
+				cm = &ipv4.ControlMessage{}
+			}
+			cm.Src = p.Src.IP
+			addr.IP = p.Src.IP
+		}
+		if p.Src.Port > 0 && p.Src.Port != addr.Port {
+			logger.Panic().Msg("writeTo() called with p.Src.Port different from sending socket port")
+		}
+	}
+	ctx := logger.With()
+	if p.Ifi != nil {
+		ctx = ctx.Str("xmit_interface", p.Ifi.Name)
+	}
+	ctx = ctx.Stringer("xmit_src", &addr)
+	ctx = ctx.Stringer("xmit_dst", p.Dst)
+	l := logging.CtxLogger(ctx)
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
 	if p.Ifi != nil {
 		if p.Dst.IP.IsMulticast() {
 			if err := pc.SetMulticastInterface(p.Ifi); err != nil {
@@ -117,42 +162,23 @@ func (p *packet) writeTo(pc packetConn, logger logging.Logger, success string) {
 			}
 			cm.IfIndex = p.Ifi.Index
 		}
-		ctx = ctx.Str("xmit_interface", p.Ifi.Name)
 	}
-	if p.Msg == nil {
-		logger.Panic().Msg("relay.writeTo() called without p.Msg")
-	}
-	l := logging.CtxLogger(ctx)
-	if _, err := pc.WriteTo(p.Msg, nil, p.Dst); err != nil {
+	if _, err := pc.WriteTo(p.Msg, cm, p.Dst); err != nil {
 		l.Err(err).Msg("Failed to send packet")
 		return
 	}
 	l.Debug().Msg(success)
 }
 
-func (p *packet) sendRaw(logger logging.Logger, success string) {
-	if p.Src == nil {
-		logger.Panic().Msg("relay.sendRaw() called without p.Src")
-	}
-	if p.Src.IP == nil {
-		logger.Panic().Msg("relay.sendRaw() called without p.Src.IP")
-	}
-	if p.Dst == nil {
-		logger.Panic().Msg("relay.sendRaw() called without p.Dst")
-	}
-	if p.Dst.IP == nil {
-		logger.Panic().Msg("relay.sendRaw() called without p.Dst.IP")
-	}
-	if p.Msg == nil {
-		logger.Panic().Msg("relay.writeTo() called without p.Msg")
-	}
+func (p *packet) writeRaw(logger logging.Logger, success string) {
+	p.validateWrite(true, logger)
 	var cm *ipv4.ControlMessage
 	ctx := logger.With()
 	if p.Ifi != nil {
 		ctx = ctx.Str("xmit_interface", p.Ifi.Name)
 	}
-	ctx = ctx.Str("xmit_src", p.Src.String())
-	ctx = ctx.Str("xmit_dst", p.Dst.String())
+	ctx = ctx.Stringer("xmit_src", p.Src)
+	ctx = ctx.Stringer("xmit_dst", p.Dst)
 	l := logging.CtxLogger(ctx)
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
@@ -188,11 +214,11 @@ func (p *packet) sendRaw(logger logging.Logger, success string) {
 		Src:      ip.SrcIP,
 		Dst:      ip.DstIP,
 	}
-	rawConn.mu.Lock()
-	defer rawConn.mu.Unlock()
+	mainRC.mu.Lock()
+	defer mainRC.mu.Unlock()
 	if p.Ifi != nil {
 		if p.Dst.IP.IsMulticast() {
-			if err := rawConn.rc.SetMulticastInterface(p.Ifi); err != nil {
+			if err := mainRC.SetMulticastInterface(p.Ifi); err != nil {
 				logger.Err(err).Msg("Failed to set multicast interface")
 				return
 			}
@@ -203,7 +229,7 @@ func (p *packet) sendRaw(logger logging.Logger, success string) {
 			cm.IfIndex = p.Ifi.Index
 		}
 	}
-	if err := rawConn.rc.WriteTo(h, payload, cm); err != nil {
+	if err := mainRC.WriteTo(h, payload, cm); err != nil {
 		l.Err(err).Msg("Failed to send raw packet")
 		return
 	}
@@ -211,15 +237,15 @@ func (p *packet) sendRaw(logger logging.Logger, success string) {
 }
 
 func StartRaw() {
-	rawConn.mu.Lock()
-	defer rawConn.mu.Unlock()
-	if rawConn.rc == nil {
+	mainRC.mu.Lock()
+	defer mainRC.mu.Unlock()
+	if mainRC.RawConn == nil {
 		protocol := fmt.Sprintf("ip4:%d", syscall.IPPROTO_RAW)
 		conn, err := net.ListenIP(protocol, &net.IPAddr{})
 		if err != nil {
 			logging.Main.Fatal().Err(err).Msg("Failed to bind raw socket")
 		}
-		rawConn.rc, err = ipv4.NewRawConn(conn)
+		mainRC.RawConn, err = ipv4.NewRawConn(conn)
 		if err != nil {
 			logging.Main.Fatal().Err(err).Msg("Failed to create raw connection")
 		}

@@ -247,4 +247,5 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 	} else {
 		logging.Main.Fatal().Msg("No relays configured; aborting")
 	}
+	logging.Main.Info().Msg("All relays have terminated; exiting")
 }

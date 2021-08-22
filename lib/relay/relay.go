@@ -113,6 +113,7 @@ func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logge
 		ctx = ctx.Str("reply_src_address", p.Src.String())
 		ctx = ctx.Str("reply_dst_address", p.Dst.String())
 		ctx = ctx.Int("reply_packet_size", len(p.Msg))
+		ctx = ctx.Uint8("reply_ttl", p.TTL)
 		l := logging.CtxLogger(ctx)
 		if xmitIfIndices.Contains(p.Ifi.Index) {
 			l.Trace().Msg("Processing proxy reply packet")
@@ -188,6 +189,7 @@ func (r *Relay) listenMulticast() {
 		ctx = ctx.Str("request_src", p.Src.String())
 		ctx = ctx.Str("request_dst", p.Dst.String())
 		ctx = ctx.Int("request_packet_size", len(p.Msg))
+		ctx = ctx.Uint8("request_ttl", p.TTL)
 		l := logging.CtxLogger(ctx)
 		mcast := p.Dst.IP.Equal(r.Group.IP)
 		ucast := r.AcceptUnicast && p.Dst.IP.IsGlobalUnicast()

@@ -34,6 +34,7 @@ type packet struct {
 	Ifi *net.Interface
 	Src *net.UDPAddr
 	Dst *net.UDPAddr
+	TTL uint8
 }
 
 type packetConn struct {
@@ -66,6 +67,10 @@ func listenUDP4(addr *net.UDPAddr) (pc *packetConn, err error) {
 		pc.Close()
 		return
 	}
+	if err = pc.SetControlMessage(ipv4.FlagTTL, true); err != nil {
+		pc.Close()
+		return
+	}
 	return
 }
 
@@ -86,10 +91,11 @@ func readFrom(pc *packetConn) (p packet, err error) {
 		IP:   cm.Dst,
 		Port: pc.LocalAddr().(*net.UDPAddr).Port,
 	}
+	p.TTL = uint8(cm.TTL)
 	return
 }
 
-func (p *packet) validateWrite(srcRequired bool, logger logging.Logger) {
+func (p *packet) validateWrite(srcRequired, ttlRequired bool, logger logging.Logger) {
 	if p == nil {
 		logger.Panic().Msg("Packet write method called with nil packet")
 	}
@@ -120,13 +126,16 @@ func (p *packet) validateWrite(srcRequired bool, logger logging.Logger) {
 	if p.Dst.IP.IsMulticast() && p.Ifi == nil {
 		logger.Panic().Msg("Packet write method called with multicast destination and no interface")
 	}
+	if ttlRequired && p.TTL == 0 {
+		logger.Panic().Msg("Packet write method called without p.Msg")
+	}
 	if p.Msg == nil {
 		logger.Panic().Msg("Packet write method called without p.Msg")
 	}
 }
 
 func (p *packet) writeTo(pc *packetConn, logger logging.Logger, success string) {
-	p.validateWrite(false, logger)
+	p.validateWrite(false, false, logger)
 	var cm *ipv4.ControlMessage
 	addr := *pc.LocalAddr().(*net.UDPAddr)
 	if p.Src != nil {
@@ -153,15 +162,47 @@ func (p *packet) writeTo(pc *packetConn, logger logging.Logger, success string) 
 	if p.Ifi != nil {
 		if p.Dst.IP.IsMulticast() {
 			if err := pc.SetMulticastInterface(p.Ifi); err != nil {
-				logger.Err(err).Msg("Failed to set multicast interface")
+				l.Err(err).Msg("Failed to set multicast interface")
 				return
 			}
+			l.Trace().Msg("Set multicast interface on socket")
 		} else {
 			if cm == nil {
 				cm = &ipv4.ControlMessage{}
 			}
 			cm.IfIndex = p.Ifi.Index
 		}
+	}
+	if p.TTL > 0 {
+		var dstType string
+		var getTTLfunc func() (int, error)
+		var setTTLfunc func(int) error
+		if p.Dst.IP.IsMulticast() {
+			dstType = "multicast"
+			getTTLfunc = pc.MulticastTTL
+			setTTLfunc = pc.SetMulticastTTL
+		} else {
+			dstType = "unicast"
+			getTTLfunc = pc.TTL
+			setTTLfunc = pc.SetTTL
+		}
+		ttl, err := getTTLfunc()
+		if err != nil {
+			l.Err(err).Msgf("Failed to obtain current %s TTL", dstType)
+			return
+		}
+		if err := setTTLfunc(int(p.TTL)); err != nil {
+			l.Err(err).Msgf("Failed to set %s TTL", dstType)
+			return
+		}
+		l.Trace().Uint8("ttl", p.TTL).Msgf("Set %s TTL on socket", dstType)
+		defer func() {
+			if err := setTTLfunc(ttl); err != nil {
+				l.Err(err).Msgf("Failed to restore %s TTL", dstType)
+				return
+			}
+			l.Trace().Int("ttl", ttl).Msgf("Restored %s TTL on socket", dstType)
+		}()
 	}
 	if _, err := pc.WriteTo(p.Msg, cm, p.Dst); err != nil {
 		l.Err(err).Msg("Failed to send packet")
@@ -171,7 +212,7 @@ func (p *packet) writeTo(pc *packetConn, logger logging.Logger, success string) 
 }
 
 func (p *packet) writeRaw(logger logging.Logger, success string) {
-	p.validateWrite(true, logger)
+	p.validateWrite(true, true, logger)
 	var cm *ipv4.ControlMessage
 	ctx := logger.With()
 	if p.Ifi != nil {
@@ -191,7 +232,7 @@ func (p *packet) writeRaw(logger logging.Logger, success string) {
 	}
 	ip := &layers.IPv4{
 		Version:  ipv4.Version,
-		TTL:      1,
+		TTL:      p.TTL,
 		Protocol: layers.IPProtocolUDP,
 		SrcIP:    p.Src.IP,
 		DstIP:    p.Dst.IP,
@@ -219,7 +260,7 @@ func (p *packet) writeRaw(logger logging.Logger, success string) {
 	if p.Ifi != nil {
 		if p.Dst.IP.IsMulticast() {
 			if err := mainRC.SetMulticastInterface(p.Ifi); err != nil {
-				logger.Err(err).Msg("Failed to set multicast interface")
+				l.Err(err).Msg("Failed to set multicast interface")
 				return
 			}
 		} else {

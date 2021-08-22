@@ -26,56 +26,70 @@ import (
 )
 
 type Config struct {
-	Parent   *viper.Viper
-	Child    *viper.Viper
-	Override *viper.Viper
+	Viper *viper.Viper
+	Order []string
 }
 
-func (c Config) getViperInstance(key string) *viper.Viper {
-	if c.Override != nil && c.Override.IsSet(key) {
-		return c.Override
+func New(viper *viper.Viper, prefixes ...string) *Config {
+	return &Config{
+		Viper: viper,
+		Order: prefixes,
 	}
-	if c.Child != nil && c.Child.IsSet(key) {
-		return c.Child
-	}
-	if c.Parent != nil {
-		return c.Parent
+}
+
+func (c *Config) getViper() *viper.Viper {
+	if c.Viper != nil {
+		return c.Viper
 	}
 	return viper.GetViper()
 }
 
-func (c Config) GetBool(key string) bool {
-	return c.getViperInstance(key).GetBool(key)
+func (c *Config) getKey(key string) string {
+	v := c.getViper()
+	k := key
+	if c.Order != nil {
+		for _, pfx := range c.Order {
+			k = pfx + "." + key
+			if v.IsSet(k) {
+				break
+			}
+		}
+	}
+	return k
 }
 
-func (c Config) GetString(key string) string {
-	return c.getViperInstance(key).GetString(key)
+func (c *Config) GetBool(key string) bool {
+	return c.getViper().GetBool(c.getKey(key))
 }
 
-func (c Config) GetStringSlice(key string) []string {
-	return c.getViperInstance(key).GetStringSlice(key)
+func (c *Config) GetString(key string) string {
+	return c.getViper().GetString(c.getKey(key))
 }
 
-func (c Config) GetDuration(key string) time.Duration {
-	return c.getViperInstance(key).GetDuration(key)
+func (c *Config) GetStringSlice(key string) []string {
+	return c.getViper().GetStringSlice(c.getKey(key))
 }
 
-func (c Config) GetUDP4Addr(key string) *net.UDPAddr {
+func (c *Config) GetDuration(key string) time.Duration {
+	return c.getViper().GetDuration(c.getKey(key))
+}
+
+func (c *Config) GetUDP4Addr(key string) *net.UDPAddr {
 	str := c.GetString(key)
 	addr, err := net.ResolveUDPAddr("udp4", str)
 	if err != nil {
-		logging.Logger.Err(err).Msgf("Unable to parse group address: %s", str)
+		logging.Main.Err(err).Msgf("Unable to parse group address: %s", str)
 	}
 	return addr
 }
 
-func (c Config) GetIfiList(key string) []*net.Interface {
+func (c *Config) GetIfiList(key string) []*net.Interface {
 	strList := c.GetStringSlice(key)
 	ifiList := make([]*net.Interface, 0, len(strList))
 	for _, name := range strList {
 		ifi, err := net.InterfaceByName(name)
 		if err != nil {
-			logging.Logger.Err(err).Msgf("Interface not found: %s", name)
+			logging.Main.Err(err).Msgf("Interface not found: %s", name)
 			continue
 		}
 		ifiList = append(ifiList, ifi)

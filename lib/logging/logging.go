@@ -18,100 +18,79 @@ package logging
 
 import (
 	"io"
-	"log/syslog"
-	"sync/atomic"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/rs/zerolog"
 )
 
 const (
-	SyslogFacility     = syslog.LOG_DAEMON
-	SyslogDefaultLevel = syslog.LOG_INFO
+	InitStderrLevel = "warn"
+	timeFormat      = time.StampMilli
 )
 
-type writerFilter struct {
-	writer io.Writer
-	level  int32
-}
-
-type LoggerInstance struct {
+type Logger struct {
 	zerolog.Logger
 }
 
-var (
-	Logger       LoggerInstance
-	stderrWriter *writerFilter
-	syslogWriter *writerFilter
-)
+type Instance struct {
+	Logger
+	Stderr      *writerFilter
+	Stdout      *writerFilter
+	Syslog      *writerFilter
+	multiWriter zerolog.LevelWriter
+}
+
+var Main Instance
 
 var timestampHook = zerolog.HookFunc(func(e *zerolog.Event, _ zerolog.Level, _ string) {
 	e.Timestamp()
 })
 
-func messageFormatter(msg interface{}) string {
-	if msg == nil {
-		return ""
-	}
-	return color.New(color.BgBlue).Sprint(msg)
-}
-
 func init() {
-	zerolog.TimeFieldFormat = time.StampMilli
-	cw := zerolog.NewConsoleWriter()
-	cw.TimeFormat = time.StampMilli
-	cw.FormatMessage = messageFormatter
-	stderrWriter = &writerFilter{
-		writer: cw,
-		level:  int32(zerolog.Disabled),
+	zerolog.TimeFieldFormat = timeFormat
+	i, err := NewInstance()
+	if err != nil {
+		defer Main.Err(err).Msg("Unable to setup main logger")
 	}
-	sl, err := syslog.New(SyslogFacility|SyslogDefaultLevel, "")
+	// This level is used only for errors during initialization and is later
+	// reset by the program during argument/config parsing.
+	i.Stderr.SetLevel(InitStderrLevel)
+	Main = i
+}
+
+func BaseLogger(i io.Writer) Logger {
+	return Logger{zerolog.New(i).Hook(timestampHook)}
+}
+
+func CtxLogger(ctx zerolog.Context) Logger {
+	return Logger{ctx.Logger()}
+}
+
+func NewInstance() (i Instance, err error) {
 	if err == nil {
-		syslogWriter = &writerFilter{
-			writer: zerolog.SyslogLevelWriter(sl),
-			level:  int32(zerolog.Disabled),
+		i.Stderr, err = newStderrWriter()
+	}
+	if err == nil {
+		i.Stdout, err = newStdoutWriter()
+	}
+	if err == nil {
+		i.Syslog, err = newSyslogWriter()
+	}
+	i.multiWriter = zerolog.MultiLevelWriter(i.Stderr, i.Stdout, i.Syslog)
+	i.Logger = BaseLogger(i.multiWriter)
+	return
+}
+
+func (i *Instance) OptimizeLevel() {
+	level := zerolog.Disabled
+	for _, wf := range []*writerFilter{i.Stderr, i.Stdout, i.Syslog} {
+		if wf != nil {
+			newLevel := wf.GetLevel()
+			if newLevel < level {
+				level = newLevel
+			}
 		}
-	} else {
-		defer Logger.Err(err).Msg("Unable to connect to syslog")
 	}
-	mw := zerolog.MultiLevelWriter(stderrWriter, syslogWriter)
-	Logger = Instance(zerolog.New(mw).Hook(timestampHook))
-}
-
-func Instance(logger zerolog.Logger) LoggerInstance {
-	return LoggerInstance{logger}
-}
-
-func (wf *writerFilter) Write(p []byte) (int, error) {
-	if wf == nil || atomic.LoadInt32(&wf.level) >= int32(zerolog.Disabled) {
-		return len(p), nil
-	}
-	return wf.writer.Write(p)
-}
-
-func (wf *writerFilter) WriteLevel(l zerolog.Level, p []byte) (int, error) {
-	if wf == nil || int32(l) < atomic.LoadInt32(&wf.level) {
-		return len(p), nil
-	}
-	if lw, ok := wf.writer.(zerolog.LevelWriter); ok {
-		return lw.WriteLevel(l, p)
-	}
-	return wf.writer.Write(p)
-}
-
-func (wf *writerFilter) setLevel(level string) error {
-	l, err := zerolog.ParseLevel(level)
-	if err == nil {
-		atomic.StoreInt32(&wf.level, int32(l))
-	}
-	return err
-}
-
-func SetStderrLevel(level string) error {
-	return stderrWriter.setLevel(level)
-}
-
-func SetSyslogLevel(level string) error {
-	return syslogWriter.setLevel(level)
+	i.Logger = Logger{i.Level(level)}
+	return
 }

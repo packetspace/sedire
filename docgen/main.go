@@ -1,5 +1,3 @@
-// +build all docs
-
 /*
 Copyright © 2021 Mike Joseph <mike@mjoseph.org>
 
@@ -16,21 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cmd
+package main
 
 import (
 	"os"
 
+	"github.com/Mike-Joseph/sedire/cmd"
 	"github.com/Mike-Joseph/sedire/lib/logging"
+
+	"github.com/spf13/cobra"
 )
 
-var docsGenerators = make([]func(string, logging.Logger), 0)
-
-func init() {
-	rootCmd.DisableAutoGenTag = true
+type generatorParams struct {
+	Cmds   []*cobra.Command
+	Dir    string
+	Logger logging.Logger
 }
 
-func GenerateDocs() {
+var docsGenerators = make([]func(generatorParams), 0)
+
+func main() {
 	if len(os.Args) < 2 {
 		logging.Main.Fatal().Msg("Path for docs output required")
 	} else if len(os.Args) > 2 {
@@ -41,7 +44,17 @@ func GenerateDocs() {
 	logging.Main.Stderr.SetLevel("info")
 	l := logging.CtxLogger(logging.Main.With().Str("directory", dir))
 
-	for _, gen := range docsGenerators {
-		gen(dir, l)
+	cmds := cmd.AllCommands()
+	for _, c := range cmds {
+		c.DisableAutoGenTag = true
+	}
+
+	gp := generatorParams{
+		Cmds:   cmds,
+		Dir:    dir,
+		Logger: l,
+	}
+	for _, f := range docsGenerators {
+		f(gp)
 	}
 }

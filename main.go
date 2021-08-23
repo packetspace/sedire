@@ -1,5 +1,3 @@
-// +build !docs
-
 /*
 Copyright © 2021 Mike Joseph <mike@mjoseph.org>
 

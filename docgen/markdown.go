@@ -1,4 +1,4 @@
-// +build docs
+// +build all markdown
 
 /*
 Copyright © 2021 Mike Joseph <mike@mjoseph.org>
@@ -18,8 +18,14 @@ limitations under the License.
 
 package main
 
-import "github.com/Mike-Joseph/sedire/cmd"
+import "github.com/spf13/cobra/doc"
 
-func main() {
-	cmd.GenerateDocs()
+func init() {
+	f := func(gp generatorParams) {
+		for _, c := range gp.Cmds {
+			err := doc.GenMarkdownTree(c, gp.Dir)
+			gp.Logger.Err(err).Str("command", "root").Msg("Generate markdown tree")
+		}
+	}
+	docsGenerators = append(docsGenerators, f)
 }

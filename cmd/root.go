@@ -65,6 +65,12 @@ func Execute() {
 	cobra.CheckErr(rootCmd.Execute())
 }
 
+func AllCommands() []*cobra.Command {
+	return []*cobra.Command{
+		rootCmd,
+	}
+}
+
 func init() {
 	rootCmd.Version = buildinfo.Default.AppVersion()
 	cobra.OnInitialize(initConfig)

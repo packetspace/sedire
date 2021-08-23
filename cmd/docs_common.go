@@ -1,4 +1,4 @@
-// +build !docs
+// +build all docs
 
 /*
 Copyright © 2021 Mike Joseph <mike@mjoseph.org>
@@ -16,10 +16,32 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package cmd
 
-import "github.com/packetspace/sedire/cmd"
+import (
+	"os"
 
-func main() {
-	cmd.Execute()
+	"github.com/Mike-Joseph/sedire/lib/logging"
+)
+
+var docsGenerators = make([]func(string, logging.Logger), 0)
+
+func init() {
+	rootCmd.DisableAutoGenTag = true
+}
+
+func GenerateDocs() {
+	if len(os.Args) < 2 {
+		logging.Main.Fatal().Msg("Path for docs output required")
+	} else if len(os.Args) > 2 {
+		logging.Main.Fatal().Msg("Too many arguments supplied")
+	}
+	dir := os.Args[1]
+
+	logging.Main.Stderr.SetLevel("info")
+	l := logging.CtxLogger(logging.Main.With().Str("directory", dir))
+
+	for _, gen := range docsGenerators {
+		gen(dir, l)
+	}
 }

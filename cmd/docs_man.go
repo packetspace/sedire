@@ -1,4 +1,4 @@
-// +build !docs
+// +build all docs,man
 
 /*
 Copyright © 2021 Mike Joseph <mike@mjoseph.org>
@@ -16,10 +16,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package cmd
 
-import "github.com/packetspace/sedire/cmd"
+import (
+	"github.com/Mike-Joseph/sedire/lib/logging"
 
-func main() {
-	cmd.Execute()
+	"github.com/spf13/cobra/doc"
+)
+
+func init() {
+	f := func(dir string, logger logging.Logger) {
+		header := &doc.GenManHeader{
+			Title:   "sedire",
+			Section: "8",
+		}
+		err := doc.GenManTree(rootCmd, header, dir)
+		logger.Err(err).Str("command", "root").Msg("Generate man tree")
+	}
+	docsGenerators = append(docsGenerators, f)
 }

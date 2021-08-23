@@ -1,4 +1,4 @@
-// +build !docs
+// +build docs
 
 /*
 Copyright © 2021 Mike Joseph <mike@mjoseph.org>
@@ -18,8 +18,8 @@ limitations under the License.
 
 package main
 
-import "github.com/packetspace/sedire/cmd"
+import "github.com/Mike-Joseph/sedire/cmd"
 
 func main() {
-	cmd.Execute()
+	cmd.GenerateDocs()
 }

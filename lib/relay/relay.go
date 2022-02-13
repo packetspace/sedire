@@ -287,6 +287,12 @@ func (r *Relay) Validate(fatal bool) bool {
 	if len(r.IfiSendList)+len(r.IfiReflectList) < 1 {
 		return e("at least one send or reflect interface must be defined")
 	}
+	if r.ResponseTimeout < 0 {
+		return e("invalid response_timeout specified")
+	}
+	if r.StatsInterval < 0 {
+		return e("invalid stats_interval specified")
+	}
 	return true
 }
 

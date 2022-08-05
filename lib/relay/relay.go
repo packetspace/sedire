@@ -26,7 +26,11 @@ import (
 	mapset "github.com/deckarep/golang-set"
 )
 
-const IPv4mcast = "224.0.0.0"
+const (
+	IPv4mcast = "224.0.0.0"
+
+	sleepForStartStop = 100 * time.Millisecond
+)
 
 type Relay struct {
 	Group               *net.UDPAddr
@@ -43,8 +47,33 @@ type Relay struct {
 	Logger              logging.Logger
 	TerminationFunction func()
 
-	mcastListener *packetConn
+	running       atomic.Value // type: chan struct{}
+	mcastListener atomic.Value // type: *packetConn
 	stats         RelayStats
+}
+
+func (r *Relay) setRunning(v chan struct{}) {
+	r.running.Store(v)
+}
+
+func (r *Relay) getRunning() chan struct{} {
+	v := r.running.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(chan struct{})
+}
+
+func (r *Relay) setMcastListener(v *packetConn) {
+	r.mcastListener.Store(v)
+}
+
+func (r *Relay) getMcastListener() *packetConn {
+	v := r.mcastListener.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(*packetConn)
 }
 
 func (r *Relay) relayRequest(pc *packetConn, p packet, reflect bool, ifIndices mapset.Set, logger logging.Logger) {
@@ -132,7 +161,7 @@ func (r *Relay) proxyRequest(req packet, reflect bool, deadline time.Time, logge
 				atomic.AddUint64(&r.stats.ProxiedReplies, 1)
 				if r.ReplySrcPortReuse && p.Src.Port == r.Group.Port {
 					atomic.AddUint64(&r.stats.SrcPortReusedReplies, 1)
-					pc = r.mcastListener
+					pc = r.getMcastListener()
 				}
 				p.Src = nil
 				p.writeTo(pc, l, "Relayed reply packet to client")
@@ -171,10 +200,10 @@ func (r *Relay) listenMulticast() {
 	for _, ifi := range r.IfiReflectList {
 		reflectIfIndices.Add(ifi.Index)
 	}
-	r.mcastListener = pc
+	r.setMcastListener(pc)
 	r.Logger.Info().Msg("Started multicast listener")
 	for {
-		p, err := readFrom(r.mcastListener)
+		p, err := readFrom(pc)
 		if err != nil {
 			netErr, ok := err.(net.Error)
 			if ok && netErr != nil && netErr.Timeout() {
@@ -216,7 +245,7 @@ func (r *Relay) listenMulticast() {
 				go r.proxyRequest(p, reflect, deadline, l)
 				continue
 			}
-			r.relayRequest(r.mcastListener, p, reflect, nil, l)
+			r.relayRequest(pc, p, reflect, nil, l)
 		} else {
 			l.Trace().Msg("Discarding packet not destined to this relay")
 		}
@@ -271,34 +300,59 @@ func (r *Relay) Run() {
 	if r.TerminationFunction != nil {
 		defer r.TerminationFunction()
 	}
-	if !r.Validate(false) {
-		return
-	}
-	if r.StatsInterval > 0 {
-		ch := make(chan struct{})
-		t := time.NewTicker(r.StatsInterval)
-		go func() {
-		loop:
-			for {
-				select {
-				case <-t.C:
-					r.LogStats("interval")
-				case <-ch:
-					break loop
+	valid := r.Validate(false)
+	ch := make(chan struct{})
+	defer close(ch)
+	r.setRunning(ch)
+	if valid {
+		if r.StatsInterval > 0 {
+			t := time.NewTicker(r.StatsInterval)
+			go func() {
+			loop:
+				for {
+					select {
+					case <-t.C:
+						r.LogStats("interval")
+					case <-ch:
+						break loop
+					}
 				}
-			}
-			t.Stop()
-		}()
-		defer close(ch)
+				t.Stop()
+			}()
+		}
+		r.listenMulticast()
+		r.Logger.Info().Msg("This relay instance is terminating")
 	}
-	r.listenMulticast()
-	r.Logger.Info().Msg("This relay instance is terminating")
 }
 
-func (r *Relay) Start() {
+func (r *Relay) terminate() {
+	for {
+		select {
+		case <-r.getRunning():
+			return
+		default:
+			pc := r.getMcastListener()
+			if pc != nil {
+				pc.SetReadDeadline(time.Now())
+			}
+		}
+		time.Sleep(sleepForStartStop)
+	}
+}
+
+func (r *Relay) Start(wait bool) {
 	go r.Run()
+	if wait {
+		for r.getRunning() == nil {
+			time.Sleep(sleepForStartStop)
+		}
+	}
 }
 
-func (r *Relay) Stop() {
-	r.mcastListener.SetReadDeadline(time.Now())
+func (r *Relay) Stop(wait bool) {
+	if wait {
+		r.terminate()
+	} else {
+		go r.terminate()
+	}
 }

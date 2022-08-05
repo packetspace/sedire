@@ -158,7 +158,7 @@ func handleSignals(c <-chan os.Signal) {
 			logging.Main.Info().Msg("Terminating by request")
 			for _, r := range relays {
 				r.LogStats("termination")
-				r.Stop()
+				r.Stop(false)
 			}
 		case syscall.SIGWINCH:
 			for _, r := range relays {
@@ -238,7 +238,7 @@ func rootCmdRun(cmd *cobra.Command, args []string) {
 		signal.Notify(signalHandler, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT, syscall.SIGWINCH)
 		wg.Add(len(relays))
 		for _, r := range relays {
-			r.Start()
+			r.Start(false)
 		}
 		wg.Wait()
 	} else if cfgGlobal.GetBool("run_if_empty") {

@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Mike-Joseph/sedire/lib/logging"
+	"github.com/mike-joseph/sedire/lib/logging"
 
 	mapset "github.com/deckarep/golang-set"
 )

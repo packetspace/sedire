@@ -22,7 +22,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/Mike-Joseph/sedire/lib/logging"
+	"github.com/mike-joseph/sedire/lib/logging"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"

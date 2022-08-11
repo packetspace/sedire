@@ -23,9 +23,9 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/Mike-Joseph/sedire/lib/config"
-	"github.com/Mike-Joseph/sedire/lib/logging"
-	"github.com/Mike-Joseph/sedire/lib/relay"
+	"github.com/mike-joseph/sedire/lib/config"
+	"github.com/mike-joseph/sedire/lib/logging"
+	"github.com/mike-joseph/sedire/lib/relay"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

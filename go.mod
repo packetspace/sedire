@@ -1,4 +1,4 @@
-module github.com/Mike-Joseph/sedire
+module github.com/mike-joseph/sedire
 
 go 1.13
 

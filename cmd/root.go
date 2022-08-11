@@ -23,6 +23,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/mike-joseph/buildinfo"
 	"github.com/mike-joseph/sedire/lib/config"
 	"github.com/mike-joseph/sedire/lib/logging"
 	"github.com/mike-joseph/sedire/lib/relay"
@@ -65,6 +66,7 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.Version = buildinfo.Default.AppVersion()
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.

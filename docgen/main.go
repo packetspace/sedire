@@ -19,8 +19,8 @@ package main
 import (
 	"os"
 
-	"github.com/Mike-Joseph/sedire/cmd"
-	"github.com/Mike-Joseph/sedire/lib/logging"
+	"github.com/packetspace/sedire/cmd"
+	"github.com/packetspace/sedire/lib/logging"
 
 	"github.com/spf13/cobra"
 )

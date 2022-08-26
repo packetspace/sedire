@@ -16,7 +16,7 @@ limitations under the License.
 
 package main
 
-import "github.com/mike-joseph/sedire/cmd"
+import "github.com/packetspace/sedire/cmd"
 
 func main() {
 	cmd.Execute()

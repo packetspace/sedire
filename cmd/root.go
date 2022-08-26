@@ -23,10 +23,10 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/mike-joseph/buildinfo"
-	"github.com/mike-joseph/sedire/lib/config"
-	"github.com/mike-joseph/sedire/lib/logging"
-	"github.com/mike-joseph/sedire/lib/relay"
+	"github.com/packetspace/buildinfo"
+	"github.com/packetspace/sedire/lib/config"
+	"github.com/packetspace/sedire/lib/logging"
+	"github.com/packetspace/sedire/lib/relay"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

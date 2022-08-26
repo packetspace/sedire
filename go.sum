@@ -184,8 +184,8 @@ github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaO
 github.com/mattn/go-isatty v0.0.3 h1:ns/ykhmWi7G9O+8a448SecJU3nSMBXJfqQkl0upE1jI=
 github.com/mattn/go-isatty v0.0.3/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
-github.com/mike-joseph/buildinfo v0.0.0-20220811234504-8411d31c29b1 h1:ug/V2WbIPZLFlK/P8vj6f0hs4lmhNRKyTQ0nMkLxYFw=
-github.com/mike-joseph/buildinfo v0.0.0-20220811234504-8411d31c29b1/go.mod h1:yqp2lTv4j535f88dNrqRKbFSabAVljlFW36DbJPDyBo=
+github.com/packetspace/buildinfo v0.0.0-20220811234504-8411d31c29b1 h1:ug/V2WbIPZLFlK/P8vj6f0hs4lmhNRKyTQ0nMkLxYFw=
+github.com/packetspace/buildinfo v0.0.0-20220811234504-8411d31c29b1/go.mod h1:yqp2lTv4j535f88dNrqRKbFSabAVljlFW36DbJPDyBo=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=
 github.com/mitchellh/go-homedir v1.0.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/mitchellh/go-testing-interface v1.0.0/go.mod h1:kRemZodwjscx+RGhAo8eIhFbs2+BFgRtFPeD/KE+zxI=

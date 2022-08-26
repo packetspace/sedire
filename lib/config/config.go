@@ -20,7 +20,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/mike-joseph/sedire/lib/logging"
+	"github.com/packetspace/sedire/lib/logging"
 
 	"github.com/spf13/viper"
 )

@@ -184,8 +184,6 @@ github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaO
 github.com/mattn/go-isatty v0.0.3 h1:ns/ykhmWi7G9O+8a448SecJU3nSMBXJfqQkl0upE1jI=
 github.com/mattn/go-isatty v0.0.3/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
-github.com/packetspace/buildinfo v0.0.0-20220811234504-8411d31c29b1 h1:ug/V2WbIPZLFlK/P8vj6f0hs4lmhNRKyTQ0nMkLxYFw=
-github.com/packetspace/buildinfo v0.0.0-20220811234504-8411d31c29b1/go.mod h1:yqp2lTv4j535f88dNrqRKbFSabAVljlFW36DbJPDyBo=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=
 github.com/mitchellh/go-homedir v1.0.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/mitchellh/go-testing-interface v1.0.0/go.mod h1:kRemZodwjscx+RGhAo8eIhFbs2+BFgRtFPeD/KE+zxI=
@@ -198,6 +196,12 @@ github.com/mitchellh/mapstructure v1.4.1/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RR
 github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/reflect2 v0.0.0-20180701023420-4b7aa43c6742/go.mod h1:bx2lNnkwVCuqBIxFjflWJWanXIb3RllmbCylyMrvgv0=
 github.com/modern-go/reflect2 v1.0.1/go.mod h1:bx2lNnkwVCuqBIxFjflWJWanXIb3RllmbCylyMrvgv0=
+github.com/packetspace/buildinfo v0.0.0-20220826212935-350a8b694390 h1:JjAU/MMV6UciVg+K/s6Uv4hSN8xfZB1CA7oWqa/JNu4=
+github.com/packetspace/buildinfo v0.0.0-20220826212935-350a8b694390/go.mod h1:5ex1NpZ4LvbwpKEpbYkFwcjR49J98RE/99w8vKeckeU=
+github.com/packetspace/buildinfo v0.0.0-20220826213859-f4b6c766a55f h1:YZ16kTUCgSVviSrrxOeG17reWZ/E+oaB0m8ma830DIM=
+github.com/packetspace/buildinfo v0.0.0-20220826213859-f4b6c766a55f/go.mod h1:5ex1NpZ4LvbwpKEpbYkFwcjR49J98RE/99w8vKeckeU=
+github.com/packetspace/buildinfo v1.0.0 h1:h8/z0nO6Ay9N8MtD2lUznkDfF4TeedMPrTlz/fMDocQ=
+github.com/packetspace/buildinfo v1.0.0/go.mod h1:5ex1NpZ4LvbwpKEpbYkFwcjR49J98RE/99w8vKeckeU=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
 github.com/pelletier/go-toml v1.9.3 h1:zeC5b1GviRUyKYd6OJPvBU/mcVDVoL1OhT17FCt5dSQ=
 github.com/pelletier/go-toml v1.9.3/go.mod h1:u1nR/EPcESfeI/szUZKdtJ0xRNbUoANCkoOuaOx1Y+c=

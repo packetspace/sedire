@@ -33,6 +33,7 @@ const (
 )
 
 type Relay struct {
+	stats         		RelayStats
 	Group               *net.UDPAddr
 	IfiRecvList         []*net.Interface
 	IfiSendList         []*net.Interface
@@ -49,7 +50,6 @@ type Relay struct {
 
 	running       atomic.Value // type: chan struct{}
 	mcastListener atomic.Value // type: *packetConn
-	stats         RelayStats
 }
 
 func (r *Relay) setRunning(v chan struct{}) {
